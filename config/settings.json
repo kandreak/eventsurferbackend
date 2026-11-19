@@ -1,0 +1,66 @@
+{
+  "application": {
+    "timezone": "Europe/Rome",
+    "output_directory": "output"
+  },
+  "collection": {
+    "max_posts_per_source": 30,
+    "max_images_per_post": 10,
+    "max_total_charge_usd": 1.0,
+    "actors": {
+      "instagram": {
+        "id": "apify/instagram-scraper",
+        "input_template": {
+          "directUrls": [
+            "{url}"
+          ],
+          "resultsType": "posts",
+          "resultsLimit": "{max_posts}",
+          "onlyPostsNewerThan": "{lookback_days} days",
+          "skipPinnedPosts": false
+        },
+        "field_map": {
+          "external_id": "id",
+          "post_url": "url",
+          "caption": "caption",
+          "published_at": "timestamp",
+          "media_urls": "images",
+          "author": "ownerUsername"
+        }
+      },
+      "facebook": {
+        "id": "monkey.d.scraping/facebook-page-posts-scraper",
+        "input_template": {
+          "pageUrls": [
+            {
+              "url": "{url}"
+            }
+          ],
+          "maxPosts": "{max_posts}",
+          "postsSince": "{since_date}"
+        },
+        "field_map": {
+          "external_id": "postId",
+          "post_url": "url",
+          "caption": "text",
+          "published_at": "createdAt",
+          "media_urls": "imageUrls",
+          "author": "pageName"
+        }
+      }
+    }
+  },
+  "ai": {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash-lite",
+    "max_concurrent_requests": 2,
+    "max_retries": 1
+  },
+  "calendar": {
+    "filename": "events.ics"
+  },
+  "reporting": {
+    "json_enabled": true,
+    "text_report_enabled": true
+  }
+}
