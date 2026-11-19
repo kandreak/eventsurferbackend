@@ -22,8 +22,8 @@ python -m pip install -e ".[test]"
 Copy-Item .env.example .env
 ```
 
-Set `MONGODB_URI` and, optionally, `MONGODB_DATABASE` in `.env`, then start
-the service:
+Set `MONGODB_URI` and, optionally, `MONGODB_DATABASE` in `.env` (the default
+database name is `eventsurfer`), then start the service:
 
 ```powershell
 uvicorn events.api.app:app --reload

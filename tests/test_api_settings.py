@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from events.api import app as app_module
@@ -5,6 +6,15 @@ from events.api.app import app
 from events.api.dependencies import get_users_repository
 from events.api.schemas import UserSettings
 from events.core.settings import BackendSettings
+
+
+@pytest.fixture(autouse=True)
+def disable_database_connection(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "BackendSettings",
+        lambda: BackendSettings(_env_file=None),
+    )
 
 
 class InMemoryUsersRepository:
@@ -75,7 +85,7 @@ def test_database_routes_return_503_when_mongodb_is_not_configured(monkeypatch):
     monkeypatch.setattr(
         app_module,
         "BackendSettings",
-        lambda: BackendSettings(mongodb_uri=None),
+        lambda: BackendSettings(mongodb_uri=None, _env_file=None),
     )
     with TestClient(app) as client:
         health = client.get("/health")
@@ -86,6 +96,12 @@ def test_database_routes_return_503_when_mongodb_is_not_configured(monkeypatch):
 
 
 def test_blank_mongodb_uri_is_treated_as_unconfigured():
-    settings = BackendSettings(mongodb_uri="   ")
+    settings = BackendSettings(mongodb_uri="   ", _env_file=None)
 
     assert settings.mongodb_uri is None
+
+
+def test_default_database_name_matches_the_application():
+    settings = BackendSettings(_env_file=None)
+
+    assert settings.mongodb_database == "eventsurfer"

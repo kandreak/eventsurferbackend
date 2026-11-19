@@ -13,7 +13,7 @@ class BackendSettings(BaseSettings):
     )
 
     mongodb_uri: SecretStr | None = None
-    mongodb_database: str = "events"
+    mongodb_database: str = "eventsurfer"
 
     @field_validator("mongodb_uri", mode="before")
     @classmethod
