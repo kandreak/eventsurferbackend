@@ -1,19 +1,23 @@
-# Events Aggregator Backend
+# Eventsurfer Backend
 
-This repository is the FastAPI backend foundation for the existing Events
-Aggregator. It carries forward the original Apify collectors, Gemini
-extractor, event models, deduplication, calendar export, reports, CLI, and
-their tests. The HTTP API is being added incrementally around that working
-pipeline.
+A single Python project for a multi-user events aggregation backend. The
+backend is being built around the existing event models, Apify collectors,
+Gemini extractor, event deduplication, calendar generation, and reporting
+logic.
 
-## Current API slice
+## Current status
 
-- `GET /health` checks that the service is responding.
-- `GET /api/users/{user_id}/settings` retrieves a user's settings.
-- `PUT /api/users/{user_id}/settings` creates or replaces a user's settings.
-- MongoDB connection initialization and indexes for posts, events, and runs.
+- FastAPI health endpoint: `GET /health`.
+- Per-user settings API:
+  - `GET /api/users/{user_id}/settings`
+  - `PUT /api/users/{user_id}/settings`
+- Async MongoDB Atlas connection configured through environment variables.
+- Startup ping and initial indexes for posts, events, and runs.
+- User settings are stored in MongoDB's `users` collection.
+- Existing collector, extraction, event, and calendar components are retained
+  and covered by tests, but are **not yet connected to API-managed runs**.
 
-Run the API locally:
+## Run locally
 
 ```powershell
 py -3.12 -m venv .venv
@@ -22,42 +26,97 @@ python -m pip install -e ".[test]"
 Copy-Item .env.example .env
 ```
 
-Set `MONGODB_URI` and, optionally, `MONGODB_DATABASE` in `.env` (the default
-database name is `eventsurfer`), then start the service:
+Set `MONGODB_URI` in `.env` to the Atlas connection string and, optionally,
+set `MONGODB_DATABASE` (defaults to `eventsurfer`). Keep `.env` private; it is
+ignored by Git. Then start the API:
 
 ```powershell
 uvicorn events.api.app:app --reload
 ```
 
-Interactive API documentation is available at `/docs`. Without a MongoDB URI,
-the service starts for local health checks, while database-backed endpoints
-return `503 Service Unavailable`. Settings data is stored in the `users`
-collection; source URLs and lookback periods are validated before persistence.
+The local API is available at `http://127.0.0.1:8000`; interactive docs are at
+`/docs`. When `MONGODB_URI` is not configured, health checks still work, while
+database-backed routes return `503 Service Unavailable`.
 
-`user_id` is an application-level identifier only. Authentication and
-authorization are not implemented. Do not expose this development API publicly
-until an access-control layer is added.
+The API currently stores settings only. It does not yet create or execute
+processing runs, collect posts, or save events.
 
-## Existing pipeline
+## TODO — build a working backend
 
-The original pipeline modules remain available, including the CLI entrypoint
-(`python -m events.main`). It still expects its JSON config and local output
-directory, as before; that CLI has not yet been wired to MongoDB. Configure
-provider credentials through environment variables, never through user
-settings.
+Work through these steps in order. Keep the API and worker separate, use MongoDB
+as the source of truth, and avoid running Apify or Gemini work inside HTTP
+handlers.
 
-## Next implementation phases
+1. **Persist posts and analysis cache**
+   - Add a posts repository using the existing unique
+     `(user_id, platform, external_id)` index.
+   - Store normalized post data, raw provider data, content hashes, analysis
+     status, and extracted events.
+   - Reuse analysis for unchanged posts and re-analyze relevant content changes.
+   - Test cache behavior and isolation between users.
 
-The MongoDB connection and indexes are the persistence foundation. Next steps
-are MongoDB-backed post/event repositories and cache integration, followed by
-run checkpoints and worker locking, run/event/calendar endpoints, and finally
-Cloud Run deployment. HTTP handlers must not run Apify or Gemini processing.
+2. **Persist and serve events**
+   - Add an events repository and a stored event schema with source attribution,
+     confidence, review flags, status, and timestamps.
+   - Reuse the existing event validation, normalization, and deduplication
+     behavior.
+   - Add user-scoped event listing and JSON export, with date, source, and
+     status filters.
+   - Add dynamic ICS generation from stored events and preserve current
+     calendar behavior, including undated events in JSON.
+
+3. **Implement run management**
+   - Add a runs repository and `POST`/`GET` run endpoints.
+   - Persist run status, current stage, progress, checkpoints, timestamps, and
+     errors.
+   - Add atomic worker leasing/locking and idempotent stage transitions.
+   - Implement resume for failed or interrupted runs.
+
+4. **Build the worker pipeline**
+   - Add a worker entrypoint that accepts a `run_id` and loads all state and
+     settings from MongoDB.
+   - Connect the existing collectors and Gemini extraction to independently
+     restartable stages.
+   - Persist results and checkpoints as stages complete; keep provider errors
+     visible in run status and reports.
+   - Support local worker execution first. Do not trigger provider calls in
+     tests; mocked tests must remain the default.
+
+5. **Connect API runs to background execution**
+   - Make run-creation and resume requests schedule work rather than execute
+     long-running tasks in request handlers.
+   - Use a local development runner initially. Add Cloud Run Jobs integration
+     only when deployment is wanted.
+
+6. **Finish API behavior and harden**
+   - Implement run history, run detail, resume, events, JSON, and ICS routes.
+   - Standardize validation and error responses; enforce `user_id` scoping in
+     every repository operation.
+   - Add integration tests for persistence, concurrency/leases, resuming, and
+     user isolation.
+   - Add authentication and authorization before exposing the API publicly.
+
+7. **Package and deploy (optional)**
+   - Add one Docker image with separate API and worker entrypoints.
+   - Document local deployment and verify resource, network, and secret
+     configuration.
+   - Deploy to Cloud Run only when ready: it requires a linked Google Cloud
+     billing account, and free allowances do not guarantee zero cost.
+
+## Cost-conscious development
+
+The API and tests can be developed locally with an Atlas free/shared cluster.
+Tests should use mocked Apify/Gemini calls and must not consume provider
+credits. Live Apify or Gemini requests may incur charges; do not run them
+without intentionally choosing to do so. No Google Cloud deployment is needed
+for local development.
+
+`user_id` is currently an application-level identifier, not authentication.
+Do not expose this development API as a public multi-user service until an
+access-control layer is implemented.
 
 ## Tests
 
 ```powershell
 python -m pytest
 ```
-
-Tests use mocked provider calls and an in-memory repository; they do not
-contact MongoDB, Apify, or Gemini.
