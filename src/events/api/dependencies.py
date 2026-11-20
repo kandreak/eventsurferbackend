@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, status
 from pymongo.asynchronous.database import AsyncDatabase
 
+from events.persistence.events_repository import EventsRepository
 from events.persistence.users_repository import UsersRepository
 
 
@@ -22,6 +23,15 @@ def get_users_repository(
     return UsersRepository(database["users"])
 
 
+def get_events_repository(
+    database: Annotated[AsyncDatabase, Depends(get_database)],
+) -> EventsRepository:
+    return EventsRepository(database["events"])
+
+
 UsersRepositoryDependency = Annotated[
     UsersRepository, Depends(get_users_repository)
+]
+EventsRepositoryDependency = Annotated[
+    EventsRepository, Depends(get_events_repository)
 ]

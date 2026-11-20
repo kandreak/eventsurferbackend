@@ -15,6 +15,7 @@ from pydantic import (
 )
 
 Platform = Literal["instagram", "facebook"]
+EventStatus = Literal["active", "cancelled", "archived"]
 NonEmptyString = Annotated[str, Field(min_length=1)]
 
 

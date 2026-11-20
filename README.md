@@ -11,11 +11,17 @@ logic.
 - Per-user settings API:
   - `GET /api/users/{user_id}/settings`
   - `PUT /api/users/{user_id}/settings`
+- User-scoped event API:
+  - `GET /api/users/{user_id}/events`
+  - `GET /api/users/{user_id}/events.json`
+  - `GET /api/users/{user_id}/events.ics`
 - Async MongoDB Atlas connection configured through environment variables.
 - Startup ping and initial indexes for posts, events, and runs.
 - User settings are stored in MongoDB's `users` collection.
 - Collected posts and their analysis cache are stored in MongoDB's `posts`
   collection whenever `MONGODB_URI` is configured.
+- Deduplicated events are stored in MongoDB's `events` collection and served
+  with optional date, source, and status filters.
 - Existing collector, extraction, event, and calendar components are retained
   and covered by tests, but are **not yet connected to API-managed runs**.
 
@@ -40,8 +46,12 @@ The local API is available at `http://127.0.0.1:8000`; interactive docs are at
 `/docs`. When `MONGODB_URI` is not configured, health checks still work, while
 database-backed routes return `503 Service Unavailable`.
 
-The API currently stores settings only. It does not yet create or execute
-processing runs, collect posts, or save events.
+Event routes accept `date_from`, `date_to`, `source` (exact source name), and
+`status` (`active`, `cancelled`, or `archived`) filters. Without a date filter,
+JSON includes undated events and ICS preserves them as calendar tasks.
+
+The API does not yet create or execute processing runs. The CLI persists posts
+and events to Atlas when `MONGODB_URI` is configured.
 
 ## TODO — build a working backend
 
@@ -53,15 +63,10 @@ handlers.
    with MongoDB Atlas. Analysis is reused only when post content and analysis
    settings match; otherwise the post returns to pending analysis.
 
-2. **Persist and serve events**
-   - Add an events repository and a stored event schema with source attribution,
-     confidence, review flags, status, and timestamps.
-   - Reuse the existing event validation, normalization, and deduplication
-     behavior.
-   - Add user-scoped event listing and JSON export, with date, source, and
-     status filters.
-   - Add dynamic ICS generation from stored events and preserve current
-     calendar behavior, including undated events in JSON.
+2. **Persist and serve events** — implemented: validated, deduplicated CLI
+   results are stored in Atlas and served through user-scoped list, JSON, and
+   dynamic ICS routes. Undated events remain in unfiltered JSON and calendar
+   output.
 
 3. **Implement run management**
    - Add a runs repository and `POST`/`GET` run endpoints.
@@ -87,7 +92,7 @@ handlers.
      only when deployment is wanted.
 
 6. **Finish API behavior and harden**
-   - Implement run history, run detail, resume, events, JSON, and ICS routes.
+   - Implement run history, run detail, and resume routes.
    - Standardize validation and error responses; enforce `user_id` scoping in
      every repository operation.
    - Add integration tests for persistence, concurrency/leases, resuming, and
@@ -106,10 +111,10 @@ handlers.
 The API and tests can be developed locally with an Atlas free/shared cluster.
 Tests use isolated in-memory database doubles and do not require MongoDB Atlas
 or call Apify/Gemini. For real CLI runs, set `MONGODB_URI` to the Atlas
-connection string; post persistence and analysis caching then use that
-configured database. Live Apify or Gemini requests may incur charges; do not
-run them without intentionally choosing to do so. No Google Cloud deployment is
-needed for local development.
+connection string; post persistence, analysis caching, and event persistence
+then use that configured database. Live Apify or Gemini requests may incur
+charges; do not run them without intentionally choosing to do so. No Google
+Cloud deployment is needed for local development.
 
 `user_id` is currently an application-level identifier, not authentication.
 Do not expose this development API as a public multi-user service until an

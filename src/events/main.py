@@ -18,6 +18,7 @@ from events.config import ActorSettings, SettingsConfig, load_config
 from events.core.settings import BackendSettings
 from events.models import Event, SocialPost, SourceConfig
 from events.persistence.mongodb import MongoDatabase
+from events.persistence.events_repository import EventsRepository
 from events.persistence.posts_repository import (
     PostsRepository,
     analysis_content_hash,
@@ -460,6 +461,7 @@ async def _run(
     backend_settings = BackendSettings()
     mongo: MongoDatabase | None = None
     posts_repository: PostsRepository | None = None
+    events_repository: EventsRepository | None = None
     if (
         stage in ("all", "collect", "analyze")
         and backend_settings.mongodb_uri is not None
@@ -474,6 +476,7 @@ async def _run(
             await mongo.close()
             raise
         posts_repository = PostsRepository(mongo.database["posts"])
+        events_repository = EventsRepository(mongo.database["events"])
 
     try:
         if stage in ("all", "collect"):
@@ -503,6 +506,11 @@ async def _run(
                 posts_repository=posts_repository,
                 user_id=sources_config.user_id,
             )
+            if events_repository is not None:
+                await events_repository.save_events(
+                    sources_config.user_id,
+                    events,
+                )
             _write_json(
                 analysis_path,
                 {

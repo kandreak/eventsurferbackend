@@ -22,6 +22,11 @@ class MongoDatabase:
             [("user_id", ASCENDING), ("date", ASCENDING)],
             name="user_event_date",
         )
+        await self.database["events"].create_index(
+            [("user_id", ASCENDING), ("event_id", ASCENDING)],
+            unique=True,
+            name="user_event_id",
+        )
         await self.database["runs"].create_index(
             [("user_id", ASCENDING), ("started_at", ASCENDING)],
             name="user_run_history",

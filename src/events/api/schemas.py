@@ -1,9 +1,16 @@
+from datetime import UTC, datetime
 from typing import Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
-from events.models import SourceConfig
+from events.models import Event, EventStatus, SourceConfig
 
 UserId = Annotated[
     str,
@@ -38,3 +45,17 @@ class UserSettings(BaseModel):
                 "Source name and platform pairs must be unique (case-insensitive)."
             )
         return self
+
+
+class StoredEvent(Event):
+    event_id: str = Field(min_length=1)
+    status: EventStatus = "active"
+    created_at: datetime
+    updated_at: datetime
+
+    @field_validator("created_at", "updated_at")
+    @classmethod
+    def timestamps_are_utc(cls, value: datetime) -> datetime:
+        if value.utcoffset() is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)

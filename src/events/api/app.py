@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from pymongo import AsyncMongoClient
 
+from events.api.routes.events import router as events_router
 from events.api.routes.settings import router as settings_router
 from events.core.settings import BackendSettings
 from events.persistence.mongodb import MongoDatabase
@@ -37,6 +38,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(settings_router)
+app.include_router(events_router)
 
 
 @app.get("/health", tags=["health"])
