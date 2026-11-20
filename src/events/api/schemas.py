@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -20,6 +20,8 @@ UserId = Annotated[
         pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
     ),
 ]
+RunStage = Literal["collect", "analyze", "publish"]
+RunStatus = Literal["queued", "running", "succeeded", "failed"]
 
 
 class UserSettings(BaseModel):
@@ -59,3 +61,76 @@ class StoredEvent(Event):
         if value.utcoffset() is None:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
+
+
+class RunProgress(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    completed: int = Field(default=0, ge=0)
+    total: int | None = Field(default=None, ge=0)
+    message: str | None = None
+
+
+class RunError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stage: RunStage
+    message: str = Field(min_length=1)
+    error_type: str = Field(min_length=1)
+    occurred_at: datetime
+
+    @field_validator("occurred_at")
+    @classmethod
+    def timestamp_is_utc(cls, value: datetime) -> datetime:
+        if value.utcoffset() is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+
+class StoredRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(min_length=1)
+    user_id: UserId
+    status: RunStatus
+    current_stage: RunStage
+    progress: RunProgress
+    checkpoints: dict[RunStage, datetime] = Field(default_factory=dict)
+    settings_snapshot: UserSettings
+    attempt: int = Field(ge=0)
+    error: RunError | None = None
+    errors: list[RunError] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+    @field_validator(
+        "created_at",
+        "updated_at",
+        "started_at",
+        "finished_at",
+    )
+    @classmethod
+    def timestamps_are_utc(
+        cls, value: datetime | None
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if value.utcoffset() is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    @field_validator("checkpoints")
+    @classmethod
+    def checkpoint_timestamps_are_utc(
+        cls, value: dict[RunStage, datetime]
+    ) -> dict[RunStage, datetime]:
+        return {
+            stage: (
+                timestamp.replace(tzinfo=UTC)
+                if timestamp.utcoffset() is None
+                else timestamp.astimezone(UTC)
+            )
+            for stage, timestamp in value.items()
+        }

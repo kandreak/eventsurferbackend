@@ -65,6 +65,12 @@ def _write_config(tmp_path):
                     "model": "test-model",
                     "max_concurrent_requests": 1,
                 },
+                "run_execution": {
+                    "max_concurrent_runs": 5,
+                    "max_concurrent_runs_per_user": 1,
+                    "max_outstanding_runs_per_user": 1,
+                    "lease_duration_seconds": 60,
+                },
             }
         ),
         encoding="utf-8",

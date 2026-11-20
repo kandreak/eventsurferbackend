@@ -82,12 +82,39 @@ class ReportingSettings(BaseModel):
     text_report_enabled: bool = True
 
 
+class RunExecutionSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_concurrent_runs: int = Field(gt=0)
+    max_concurrent_runs_per_user: int = Field(gt=0)
+    max_outstanding_runs_per_user: int = Field(gt=0)
+    lease_duration_seconds: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def limits_are_consistent(self) -> RunExecutionSettings:
+        if self.max_concurrent_runs_per_user > self.max_concurrent_runs:
+            raise ValueError(
+                "run_execution.max_concurrent_runs_per_user cannot exceed "
+                "max_concurrent_runs."
+            )
+        if (
+            self.max_outstanding_runs_per_user
+            < self.max_concurrent_runs_per_user
+        ):
+            raise ValueError(
+                "run_execution.max_outstanding_runs_per_user cannot be less "
+                "than max_concurrent_runs_per_user."
+            )
+        return self
+
+
 class SettingsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     application: ApplicationSettings = Field(default_factory=ApplicationSettings)
     collection: CollectionSettings
     ai: AISettings
+    run_execution: RunExecutionSettings
     calendar: CalendarSettings = Field(default_factory=CalendarSettings)
     reporting: ReportingSettings = Field(default_factory=ReportingSettings)
 
@@ -109,7 +136,7 @@ def load_config(
     sources_path: Path, settings_path: Path
 ) -> tuple[SourcesConfig, SettingsConfig]:
     sources = SourcesConfig.model_validate(_read_json(sources_path))
-    settings = SettingsConfig.model_validate(_read_json(settings_path))
+    settings = load_settings(settings_path)
     missing_actors = {
         source.platform
         for source in sources.sources
@@ -122,3 +149,7 @@ def load_config(
             f"{platforms}."
         )
     return sources, settings
+
+
+def load_settings(settings_path: Path) -> SettingsConfig:
+    return SettingsConfig.model_validate(_read_json(settings_path))

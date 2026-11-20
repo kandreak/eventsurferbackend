@@ -15,6 +15,11 @@ logic.
   - `GET /api/users/{user_id}/events`
   - `GET /api/users/{user_id}/events.json`
   - `GET /api/users/{user_id}/events.ics`
+- Run management API:
+  - `POST /api/users/{user_id}/runs` queues a run
+  - `GET /api/users/{user_id}/runs` and
+    `GET /api/users/{user_id}/runs/{run_id}` inspect runs
+  - `POST /api/users/{user_id}/runs/{run_id}/resume` requeues a failed run
 - Async MongoDB Atlas connection configured through environment variables.
 - Startup ping and initial indexes for posts, events, and runs.
 - User settings are stored in MongoDB's `users` collection.
@@ -22,8 +27,10 @@ logic.
   collection whenever `MONGODB_URI` is configured.
 - Deduplicated events are stored in MongoDB's `events` collection and served
   with optional date, source, and status filters.
-- Existing collector, extraction, event, and calendar components are retained
-  and covered by tests, but are **not yet connected to API-managed runs**.
+- Run records, per-user outstanding limits, cross-process execution slots,
+  leases, stage checkpoints, and resume state are stored in MongoDB. The run
+  executor that performs collection and analysis is not implemented yet, so
+  newly queued runs remain queued.
 
 ## Run locally
 
@@ -50,8 +57,8 @@ Event routes accept `date_from`, `date_to`, `source` (exact source name), and
 `status` (`active`, `cancelled`, or `archived`) filters. Without a date filter,
 JSON includes undated events and ICS preserves them as calendar tasks.
 
-The API does not yet create or execute processing runs. The CLI persists posts
-and events to Atlas when `MONGODB_URI` is configured.
+The API can queue and manage runs but does not execute them yet. The CLI
+persists posts and events to Atlas when `MONGODB_URI` is configured.
 
 ## TODO — build a working backend
 
@@ -73,21 +80,19 @@ stages. This component does not exist yet. Today, the CLI pipeline in
    dynamic ICS routes. Undated events remain in unfiltered JSON and calendar
    output.
 
-3. **Implement run management**
-   - Add a runs repository and `POST`/`GET` run endpoints.
-   - Persist run status, current stage, progress, checkpoints, timestamps, and
-     errors.
-   - Add a run executor that performs queued work separately from API request
-     handling. It can reuse the existing CLI pipeline; this does not prescribe
-     a thread model or deployment arrangement.
-   - Keep run limits in shared application settings (for example,
+3. **Run management foundation — implemented**
+   - User-scoped create, list, detail, and resume endpoints use a runs
+     repository. Run records store status, stage, progress, checkpoints,
+     settings snapshots, attempts, timestamps, and error history.
+   - Configure run limits in shared application settings (for example,
      `config/settings.json`), not hard-coded:
      ```json
      {
        "run_execution": {
          "max_concurrent_runs": 5,
          "max_concurrent_runs_per_user": 1,
-         "max_outstanding_runs_per_user": 1
+         "max_outstanding_runs_per_user": 1,
+         "lease_duration_seconds": 60
        }
      }
      ```
@@ -108,9 +113,18 @@ stages. This component does not exist yet. Today, the CLI pipeline in
      execution limit when an executor claims queued work.
    - Give each lease an owner token, heartbeat, and expiry. Require the current
      token for progress/checkpoint updates so an expired worker cannot update a
-     run after another worker has claimed it. Make stage writes repeatable and
-     stage transitions conditional on the expected current stage.
-   - Implement resume for failed or interrupted runs.
+     run after another executor has claimed it. Stage transitions are
+     conditional on the expected current stage; pipeline writes must be
+     repeatable when the executor is added in step 4.
+     `lease_duration_seconds` is the time allowed between heartbeats, not a
+     maximum run duration. If an executor stops renewing its lease, it expires
+     and another executor can reclaim the interrupted run. The configured
+     duration is currently 60 seconds; automatic heartbeats will be active once
+     the executor is implemented.
+   - Failed runs can be resumed from their last incomplete stage; expired
+     leases make interrupted runs claimable again.
+   - Runs can be queued and claimed, but no executor process performs their
+     collection or analysis yet; that is the work in steps 4 and 5.
 
 4. **Build the run-execution pipeline**
    - Add an executor entrypoint that accepts a `run_id` and loads all state and

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,40 @@ def test_sample_json_files_load_and_keep_per_source_lookback():
         "author": "ownerUsername",
     }
     assert settings.ai.provider == "gemini"
+    assert settings.run_execution.max_concurrent_runs == 5
+    assert settings.run_execution.max_concurrent_runs_per_user == 1
+    assert settings.run_execution.max_outstanding_runs_per_user == 1
     assert settings.collection.actors["facebook"].field_map["published_at"] == "createdAt"
+
+
+def test_run_execution_limits_are_validated(tmp_path):
+    settings_path = ROOT / "config" / "settings.json"
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    data["run_execution"]["max_concurrent_runs_per_user"] = 6
+    invalid_path = tmp_path / "settings.json"
+    invalid_path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="cannot exceed"):
+        load_config(
+            ROOT / "config" / "user_settings.json",
+            invalid_path,
+        )
+
+
+def test_run_execution_supports_a_larger_per_user_queue(tmp_path):
+    settings_path = ROOT / "config" / "settings.json"
+    data = json.loads(settings_path.read_text(encoding="utf-8"))
+    data["run_execution"]["max_outstanding_runs_per_user"] = 3
+    configured_path = tmp_path / "settings.json"
+    configured_path.write_text(json.dumps(data), encoding="utf-8")
+
+    _, settings = load_config(
+        ROOT / "config" / "user_settings.json",
+        configured_path,
+    )
+
+    assert settings.run_execution.max_outstanding_runs_per_user == 3
+    assert settings.run_execution.max_concurrent_runs_per_user == 1
 
 
 def test_invalid_json_configuration_is_reported(tmp_path):

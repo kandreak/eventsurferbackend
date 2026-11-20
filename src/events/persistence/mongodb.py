@@ -1,4 +1,4 @@
-from pymongo import ASCENDING, AsyncMongoClient
+from pymongo import ASCENDING, DESCENDING, AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
 
@@ -30,6 +30,15 @@ class MongoDatabase:
         await self.database["runs"].create_index(
             [("user_id", ASCENDING), ("started_at", ASCENDING)],
             name="user_run_history",
+        )
+        await self.database["runs"].create_index(
+            [("user_id", ASCENDING), ("created_at", DESCENDING)],
+            name="user_run_created",
+        )
+        await self.database["runs"].create_index(
+            [("run_id", ASCENDING)],
+            unique=True,
+            name="run_id_unique",
         )
 
     async def close(self) -> None:
