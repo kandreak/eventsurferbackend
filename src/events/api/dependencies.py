@@ -4,7 +4,9 @@ from fastapi import Depends, HTTPException, Request, status
 from pymongo.asynchronous.database import AsyncDatabase
 
 from events.config import RunExecutionSettings
+from events.dispatcher import RunDispatcher
 from events.persistence.events_repository import EventsRepository
+from events.persistence.run_posts_repository import RunPostsRepository
 from events.persistence.runs_repository import RunsRepository
 from events.persistence.users_repository import UsersRepository
 
@@ -31,6 +33,12 @@ def get_events_repository(
     return EventsRepository(database["events"])
 
 
+def get_run_posts_repository(
+    database: Annotated[AsyncDatabase, Depends(get_database)],
+) -> RunPostsRepository:
+    return RunPostsRepository(database["run_posts"])
+
+
 def get_runs_repository(request: Request) -> RunsRepository:
     database = get_database(request)
     settings: RunExecutionSettings | None = getattr(
@@ -46,12 +54,22 @@ def get_runs_repository(request: Request) -> RunsRepository:
     return RunsRepository(database["runs"], settings)
 
 
+def get_run_dispatcher(request: Request) -> RunDispatcher | None:
+    return getattr(request.app.state, "run_dispatcher", None)
+
+
 UsersRepositoryDependency = Annotated[
     UsersRepository, Depends(get_users_repository)
 ]
 EventsRepositoryDependency = Annotated[
     EventsRepository, Depends(get_events_repository)
 ]
+RunPostsRepositoryDependency = Annotated[
+    RunPostsRepository, Depends(get_run_posts_repository)
+]
 RunsRepositoryDependency = Annotated[
     RunsRepository, Depends(get_runs_repository)
+]
+RunDispatcherDependency = Annotated[
+    RunDispatcher | None, Depends(get_run_dispatcher)
 ]

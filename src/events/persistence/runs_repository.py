@@ -276,14 +276,9 @@ class RunsRepository:
             },
         )
 
-    async def claim_next_run(
-        self,
-        worker_id: str,
-        *,
-        run_id: str | None = None,
-    ) -> RunLease | None:
+    async def claim_next_run(self, worker_id: str) -> RunLease | None:
         now = datetime.now(UTC)
-        candidate_query: dict[str, Any] = {
+        candidate_query = {
             "$or": [
                 {"status": "queued"},
                 {
@@ -292,8 +287,6 @@ class RunsRepository:
                 },
             ]
         }
-        if run_id is not None:
-            candidate_query["run_id"] = run_id
         candidates = await self._collection.find(
             candidate_query,
             {"_id": 0},

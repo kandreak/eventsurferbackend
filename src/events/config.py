@@ -7,14 +7,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from events.models import Platform, SourcesConfig
+from events.models import Platform
 
 
 class ApplicationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timezone: str = "Europe/Rome"
-    output_directory: Path = Path("output")
 
     @field_validator("timezone")
     @classmethod
@@ -62,26 +61,6 @@ class AISettings(BaseModel):
     max_retries: int = Field(default=2, ge=0)
 
 
-class CalendarSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    filename: str = Field(default="events.ics", min_length=1)
-
-    @field_validator("filename")
-    @classmethod
-    def filename_must_be_a_file_name(cls, value: str) -> str:
-        if Path(value).name != value:
-            raise ValueError("calendar.filename must be a file name, not a path.")
-        return value
-
-
-class ReportingSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    json_enabled: bool = True
-    text_report_enabled: bool = True
-
-
 class RunExecutionSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,6 +68,7 @@ class RunExecutionSettings(BaseModel):
     max_concurrent_runs_per_user: int = Field(gt=0)
     max_outstanding_runs_per_user: int = Field(gt=0)
     lease_duration_seconds: int = Field(gt=0)
+    dispatch_poll_interval_seconds: int = Field(gt=0)
 
     @model_validator(mode="after")
     def limits_are_consistent(self) -> RunExecutionSettings:
@@ -115,8 +95,6 @@ class SettingsConfig(BaseModel):
     collection: CollectionSettings
     ai: AISettings
     run_execution: RunExecutionSettings
-    calendar: CalendarSettings = Field(default_factory=CalendarSettings)
-    reporting: ReportingSettings = Field(default_factory=ReportingSettings)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -130,25 +108,6 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Configuration file {path} must contain a JSON object.")
     return data
-
-
-def load_config(
-    sources_path: Path, settings_path: Path
-) -> tuple[SourcesConfig, SettingsConfig]:
-    sources = SourcesConfig.model_validate(_read_json(sources_path))
-    settings = load_settings(settings_path)
-    missing_actors = {
-        source.platform
-        for source in sources.sources
-        if source.platform not in settings.collection.actors
-    }
-    if missing_actors:
-        platforms = ", ".join(sorted(missing_actors))
-        raise ValueError(
-            "Missing collection.actors settings for source platform(s): "
-            f"{platforms}."
-        )
-    return sources, settings
 
 
 def load_settings(settings_path: Path) -> SettingsConfig:

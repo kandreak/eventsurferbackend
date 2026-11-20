@@ -1,7 +1,6 @@
 {
   "application": {
-    "timezone": "Europe/Rome",
-    "output_directory": "output"
+    "timezone": "Europe/Rome"
   },
   "collection": {
     "max_posts_per_source": 30,
@@ -60,13 +59,7 @@
     "max_concurrent_runs": 5,
     "max_concurrent_runs_per_user": 1,
     "max_outstanding_runs_per_user": 1,
-    "lease_duration_seconds": 60
-  },
-  "calendar": {
-    "filename": "events.ics"
-  },
-  "reporting": {
-    "json_enabled": true,
-    "text_report_enabled": true
+    "lease_duration_seconds": 60,
+    "dispatch_poll_interval_seconds": 1
   }
 }

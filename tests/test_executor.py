@@ -3,28 +3,25 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
-from pydantic import TypeAdapter
 
-from events import worker
+from events import executor
 from events.api.schemas import RunProgress, StoredRun, UserSettings
 from events.config import (
     AISettings,
     ActorSettings,
     ApplicationSettings,
-    CalendarSettings,
     CollectionSettings,
-    ReportingSettings,
     RunExecutionSettings,
     SettingsConfig,
 )
-from events.main import _report_template
+from events.pipeline import _report_template
 from events.models import SocialPost, SourceConfig
 from events.persistence.runs_repository import RunLease
 
 
-def _settings(output_directory, *, lease_duration_seconds=60) -> SettingsConfig:
+def _settings(*, lease_duration_seconds=60) -> SettingsConfig:
     return SettingsConfig(
-        application=ApplicationSettings(output_directory=output_directory),
+        application=ApplicationSettings(),
         collection=CollectionSettings(
             actors={"instagram": ActorSettings()}
         ),
@@ -34,9 +31,8 @@ def _settings(output_directory, *, lease_duration_seconds=60) -> SettingsConfig:
             max_concurrent_runs_per_user=1,
             max_outstanding_runs_per_user=1,
             lease_duration_seconds=lease_duration_seconds,
+            dispatch_poll_interval_seconds=1,
         ),
-        calendar=CalendarSettings(),
-        reporting=ReportingSettings(),
     )
 
 
@@ -157,16 +153,13 @@ def _post() -> SocialPost:
         source_name="Example Venue",
         platform="instagram",
         external_id="post-1",
-        post_url=TypeAdapter(str).validate_python(
-            "https://www.instagram.com/p/post-1/"
-        ),
+        post_url="https://www.instagram.com/p/post-1/",
         caption="Event announcement",
     )
 
 
 @pytest.mark.asyncio
-async def test_worker_executes_and_checkpoints_each_stage_without_provider_calls(
-    tmp_path,
+async def test_executor_runs_and_checkpoints_each_stage_without_provider_calls(
     monkeypatch,
 ):
     post = _post()
@@ -174,7 +167,6 @@ async def test_worker_executes_and_checkpoints_each_stage_without_provider_calls
     runs = InMemoryRunsRepository()
     run_posts = InMemoryRunPostsRepository([])
     saved_events = []
-    published = []
     report = _report_template(1)
 
     async def collect(sources, settings, secrets, **kwargs):
@@ -182,19 +174,13 @@ async def test_worker_executes_and_checkpoints_each_stage_without_provider_calls
         await asyncio.sleep(0.4)
         return [post], report
 
-    async def analyze(posts, current_report, settings, secrets, cache_path, **kwargs):
-        assert cache_path is None
+    async def analyze(posts, current_report, settings, secrets, **kwargs):
         assert posts == [post]
         return events, current_report
 
-    monkeypatch.setattr(worker, "_collect_posts", collect)
-    monkeypatch.setattr(worker, "_analyze_posts", analyze)
-    monkeypatch.setattr(
-        worker,
-        "write_outputs",
-        lambda **kwargs: published.append(kwargs),
-    )
-    executor = worker.RunExecutor(
+    monkeypatch.setattr(executor, "_collect_posts", collect)
+    monkeypatch.setattr(executor, "_analyze_posts", analyze)
+    run_executor = executor.RunExecutor(
         runs_repository=runs,
         run_posts_repository=run_posts,
         posts_repository=SimpleNamespace(),
@@ -203,12 +189,14 @@ async def test_worker_executes_and_checkpoints_each_stage_without_provider_calls
                 saved_events, user_id, saved
             )
         ),
-        settings=_settings(tmp_path, lease_duration_seconds=1),
+        settings=_settings(lease_duration_seconds=1),
         secrets=SimpleNamespace(),
         worker_id="test-worker",
     )
 
-    assert await executor.execute("run-1")
+    assert await run_executor.execute_claimed(
+        RunLease(runs.run, "lease-token")
+    )
 
     assert runs.run.status == "succeeded"
     assert runs.heartbeat_count >= 1
@@ -216,15 +204,13 @@ async def test_worker_executes_and_checkpoints_each_stage_without_provider_calls
     assert run_posts.posts == [post]
     assert run_posts.events == []
     assert saved_events == [("alice", [])]
-    assert len(published) == 1
-    assert published[0]["output_directory"] == (
-        tmp_path / "alice" / "runs" / "run-1"
+    assert runs.progress[-1][1].message == (
+        "Prepared 0 events for API retrieval."
     )
 
 
 @pytest.mark.asyncio
-async def test_worker_saves_provider_errors_in_report_and_failed_run(
-    tmp_path,
+async def test_executor_saves_provider_errors_in_report_and_failed_run(
     monkeypatch,
 ):
     runs = InMemoryRunsRepository()
@@ -235,18 +221,20 @@ async def test_worker_saves_provider_errors_in_report_and_failed_run(
     async def collect(*args, **kwargs):
         return [], report
 
-    monkeypatch.setattr(worker, "_collect_posts", collect)
-    executor = worker.RunExecutor(
+    monkeypatch.setattr(executor, "_collect_posts", collect)
+    run_executor = executor.RunExecutor(
         runs_repository=runs,
         run_posts_repository=run_posts,
         posts_repository=SimpleNamespace(),
         events_repository=SimpleNamespace(),
-        settings=_settings(tmp_path),
+        settings=_settings(),
         secrets=SimpleNamespace(),
         worker_id="test-worker",
     )
 
-    assert not await executor.execute("run-1")
+    assert not await run_executor.execute_claimed(
+        RunLease(runs.run, "lease-token")
+    )
 
     assert runs.run.status == "failed"
     assert runs.run.report["source_errors"] == ["Apify request failed."]
@@ -255,10 +243,7 @@ async def test_worker_saves_provider_errors_in_report_and_failed_run(
 
 
 @pytest.mark.asyncio
-async def test_worker_resumes_at_the_first_incomplete_stage(
-    tmp_path,
-    monkeypatch,
-):
+async def test_executor_resumes_at_the_first_incomplete_stage(monkeypatch):
     post = _post()
     runs = InMemoryRunsRepository()
     runs.run = runs.run.model_copy(
@@ -273,26 +258,27 @@ async def test_worker_resumes_at_the_first_incomplete_stage(
     async def collect(*args, **kwargs):
         raise AssertionError("A completed collect stage must not be repeated.")
 
-    async def analyze(posts, report, settings, secrets, cache_path, **kwargs):
+    async def analyze(posts, report, settings, secrets, **kwargs):
         assert posts == [post]
         return [], report
 
-    monkeypatch.setattr(worker, "_collect_posts", collect)
-    monkeypatch.setattr(worker, "_analyze_posts", analyze)
-    monkeypatch.setattr(worker, "write_outputs", lambda **kwargs: None)
-    executor = worker.RunExecutor(
+    monkeypatch.setattr(executor, "_collect_posts", collect)
+    monkeypatch.setattr(executor, "_analyze_posts", analyze)
+    run_executor = executor.RunExecutor(
         runs_repository=runs,
         run_posts_repository=run_posts,
         posts_repository=SimpleNamespace(),
         events_repository=SimpleNamespace(
             save_events=lambda user_id, saved: _save_events([], user_id, saved)
         ),
-        settings=_settings(tmp_path),
+        settings=_settings(),
         secrets=SimpleNamespace(),
         worker_id="test-worker",
     )
 
-    assert await executor.execute("run-1")
+    assert await run_executor.execute_claimed(
+        RunLease(runs.run, "lease-token")
+    )
 
     assert runs.run.status == "succeeded"
     assert set(runs.run.checkpoints) == {"collect", "analyze", "publish"}

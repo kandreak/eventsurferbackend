@@ -1,27 +1,17 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import logging
-import os
-import socket
-from pathlib import Path
-from typing import Any, Coroutine, Sequence
-from uuid import uuid4
-
-from pymongo import AsyncMongoClient
+from typing import Any, Coroutine
 
 from events.api.schemas import RunProgress, RunStage, StoredRun
-from events.calendar_export import serialize_calendar
-from events.config import SettingsConfig, load_settings
-from events.core.settings import BackendSettings
-from events.main import (
+from events.config import SettingsConfig
+from events.pipeline import (
     _analyze_posts,
     _collect_posts,
     _report_template,
 )
 from events.persistence.events_repository import EventsRepository
-from events.persistence.mongodb import MongoDatabase
 from events.persistence.posts_repository import PostsRepository
 from events.persistence.run_posts_repository import RunPostsRepository
 from events.persistence.runs_repository import (
@@ -29,10 +19,9 @@ from events.persistence.runs_repository import (
     RunLeaseLost,
     RunsRepository,
 )
-from events.reporting import write_outputs
 from events.secrets import Secrets
 
-logger = logging.getLogger("events.worker")
+logger = logging.getLogger("events.executor")
 
 
 class RunExecutor:
@@ -55,13 +44,11 @@ class RunExecutor:
         self._secrets = secrets
         self._worker_id = worker_id
 
-    async def execute(self, run_id: str) -> bool:
-        lease = await self._runs.claim_next_run(
-            self._worker_id,
-            run_id=run_id,
-        )
-        if lease is None:
-            return False
+    async def claim_next_run(self) -> RunLease | None:
+        return await self._runs.claim_next_run(self._worker_id)
+
+    async def execute_claimed(self, lease: RunLease) -> bool:
+        run_id = lease.run.run_id
         try:
             await self._with_heartbeat(
                 lease,
@@ -222,7 +209,6 @@ class RunExecutor:
             report,
             self._settings_for_run(run),
             self._secrets,
-            None,
             posts_repository=self._posts,
             user_id=run.user_id,
         )
@@ -254,26 +240,6 @@ class RunExecutor:
         if report is None:
             raise RuntimeError("Run report is missing before publication.")
         events = await self._run_posts.list_events(run.run_id)
-        output_directory = (
-            self._settings.application.output_directory
-            / run.user_id
-            / "runs"
-            / run.run_id
-        )
-        calendar_data = serialize_calendar(
-            events,
-            run.settings_snapshot.timezone,
-        )
-        await asyncio.to_thread(
-            write_outputs,
-            output_directory=output_directory,
-            calendar_filename=self._settings.calendar.filename,
-            calendar_data=calendar_data,
-            events=events,
-            report=report,
-            json_enabled=self._settings.reporting.json_enabled,
-            text_report_enabled=self._settings.reporting.text_report_enabled,
-        )
         await self._runs.update_progress(
             run.run_id,
             lease.token,
@@ -281,7 +247,7 @@ class RunExecutor:
             RunProgress(
                 completed=1,
                 total=1,
-                message=f"Published {len(events)} events.",
+                message=f"Prepared {len(events)} events for API retrieval.",
             ),
         )
 
@@ -295,83 +261,3 @@ class RunExecutor:
             lease.token,
             stage,
         )
-
-
-async def _run(
-    run_id: str,
-    *,
-    settings_path: Path = Path("config/settings.json"),
-) -> bool:
-    settings = load_settings(settings_path)
-    secrets = Secrets()
-    backend_settings = BackendSettings()
-    if backend_settings.mongodb_uri is None:
-        raise ValueError("MONGODB_URI is required to execute a run.")
-
-    client = AsyncMongoClient(
-        backend_settings.mongodb_uri.get_secret_value()
-    )
-    mongo = MongoDatabase(client, backend_settings.mongodb_database)
-    try:
-        await mongo.initialize()
-        database = mongo.database
-        executor = RunExecutor(
-            runs_repository=RunsRepository(
-                database["runs"],
-                settings.run_execution,
-            ),
-            run_posts_repository=RunPostsRepository(
-                database["run_posts"]
-            ),
-            posts_repository=PostsRepository(database["posts"]),
-            events_repository=EventsRepository(database["events"]),
-            settings=settings,
-            secrets=secrets,
-            worker_id=(
-                f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex}"
-            ),
-        )
-        return await executor.execute(run_id)
-    finally:
-        await mongo.close()
-
-
-def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="events-worker",
-        description="Execute a queued events run by its run ID.",
-    )
-    parser.add_argument("run_id")
-    parser.add_argument(
-        "--settings",
-        type=Path,
-        default=Path("config/settings.json"),
-        help="Path to the application-settings JSON file.",
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s: %(message)s",
-    )
-    arguments = _parse_args(argv)
-    try:
-        completed = asyncio.run(
-            _run(arguments.run_id, settings_path=arguments.settings)
-        )
-    except Exception:
-        logger.exception("Run executor failed.")
-        return 1
-    if not completed:
-        logger.error(
-            "Run %s could not be claimed or failed; inspect its run record.",
-            arguments.run_id,
-        )
-        return 1
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

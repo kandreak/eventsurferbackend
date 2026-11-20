@@ -36,23 +36,6 @@ class SourceConfig(BaseModel):
         return self.display_name.casefold(), self.platform
 
 
-class SourcesConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    user_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
-    sources: list[SourceConfig] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def source_identities_are_unique(self) -> SourcesConfig:
-        identities = [source.identity for source in self.sources]
-        if len(identities) != len(set(identities)):
-            raise ValueError(
-                "Source name and platform pairs must be unique "
-                "(case-insensitive)."
-            )
-        return self
-
-
 class SocialPost(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

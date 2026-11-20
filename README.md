@@ -15,11 +15,15 @@ logic.
   - `GET /api/users/{user_id}/events`
   - `GET /api/users/{user_id}/events.json`
   - `GET /api/users/{user_id}/events.ics`
-- Run management API:
-  - `POST /api/users/{user_id}/runs` queues a run
+- Run management and execution API:
+  - `POST /api/users/{user_id}/runs` queues and schedules a run
   - `GET /api/users/{user_id}/runs` and
     `GET /api/users/{user_id}/runs/{run_id}` inspect runs
   - `POST /api/users/{user_id}/runs/{run_id}/resume` requeues a failed run
+  - `GET /api/users/{user_id}/runs/{run_id}/report`
+  - `GET /api/users/{user_id}/runs/{run_id}/events.json` and
+    `GET /api/users/{user_id}/runs/{run_id}/events.ics` retrieve that run's
+    results
 - Async MongoDB Atlas connection configured through environment variables.
 - Startup ping and initial indexes for posts, events, runs, and run-scoped
   collected posts.
@@ -29,10 +33,9 @@ logic.
 - Deduplicated events are stored in MongoDB's `events` collection and served
   with optional date, source, and status filters.
 - Run records, per-user outstanding limits, cross-process execution slots,
-  leases, stage checkpoints, and resume state are stored in MongoDB. Run
-  execution is available through the `events-worker` command; the API does not
-  launch it automatically yet, so newly queued runs remain queued until an
-  executor is started.
+  leases, stage checkpoints, run-scoped results, reports, and resume state are
+  stored in MongoDB. A dispatcher inside the FastAPI lifespan automatically
+  executes queued runs; there is no separate worker command or CLI pipeline.
 
 ## Run locally
 
@@ -55,33 +58,57 @@ The local API is available at `http://127.0.0.1:8000`; interactive docs are at
 `/docs`. When `MONGODB_URI` is not configured, health checks still work, while
 database-backed routes return `503 Service Unavailable`.
 
+Save a user's sources, then start a run through the API:
+
+```powershell
+$base = "http://127.0.0.1:8000"
+$userId = "local-user"
+$settings = @{
+    timezone = "Europe/Rome"
+    sources = @(@{
+        name = "Example Venue"
+        platform = "instagram"
+        url = "https://www.instagram.com/example_venue/"
+        lookback_days = 7
+    })
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod -Method Put `
+    -Uri "$base/api/users/$userId/settings" `
+    -ContentType "application/json" `
+    -Body $settings
+$run = Invoke-RestMethod -Method Post -Uri "$base/api/users/$userId/runs"
+Invoke-RestMethod -Uri "$base/api/users/$userId/runs/$($run.run_id)"
+```
+
+Poll run detail until it is `succeeded` or `failed`, then retrieve
+`/report`, `/events.json`, or `/events.ics` using that run ID.
+
+Run creation and resume return `202 Accepted`; the FastAPI process dispatches
+the work in the background, so the HTTP request does not wait for providers.
+Run detail exposes progress and errors. After analysis completes, use the
+run-scoped JSON, ICS, and report routes above to retrieve its output.
+
 Event routes accept `date_from`, `date_to`, `source` (exact source name), and
 `status` (`active`, `cancelled`, or `archived`) filters. Without a date filter,
 JSON includes undated events and ICS preserves them as calendar tasks.
 
-The API can queue and manage runs but does not start execution automatically.
-The run executor can be invoked separately with `events-worker <run_id>`; see
-step 4 below. The CLI persists posts and events to Atlas when `MONGODB_URI` is
-configured.
-
 ## TODO — build a working backend
 
-Work through these steps in order. Keep the API and run executor separate, use
-MongoDB as the source of truth, and avoid running Apify or Gemini work inside
-HTTP handlers.
+Work through these steps in order. Run execution is managed by FastAPI but
+kept outside HTTP handlers. MongoDB is the source of truth.
 
 A **run executor** (often called a “worker”) is the backend component that
-claims a queued run and performs its collection, analysis, and publishing
-stages. The `events-worker` command runs it for a specific run ID. The API does
-not start it automatically yet. The CLI pipeline in
-[`src/events/main.py`](./src/events/main.py) remains available for direct runs.
+claims queued work and performs collection, analysis, and publication. It runs
+as an internal background task owned by the FastAPI application; it is not a
+separate command or process.
 
-1. **Persist posts and analysis cache** — implemented for CLI runs configured
+1. **Persist posts and analysis cache** — implemented for API runs configured
    with MongoDB Atlas. Analysis is reused only when post content and analysis
    settings match; otherwise the post returns to pending analysis.
 
-2. **Persist and serve events** — implemented: validated, deduplicated CLI
-   results are stored in Atlas and served through user-scoped list, JSON, and
+2. **Persist and serve events** — implemented: validated, deduplicated results
+   are stored in Atlas and served through user-scoped and run-scoped JSON and
    dynamic ICS routes. Undated events remain in unfiltered JSON and calendar
    output.
 
@@ -97,7 +124,8 @@ not start it automatically yet. The CLI pipeline in
          "max_concurrent_runs": 5,
          "max_concurrent_runs_per_user": 1,
          "max_outstanding_runs_per_user": 1,
-         "lease_duration_seconds": 60
+         "lease_duration_seconds": 60,
+         "dispatch_poll_interval_seconds": 1
        }
      }
      ```
@@ -128,42 +156,41 @@ not start it automatically yet. The CLI pipeline in
      processing a run.
    - Failed runs can be resumed from their last incomplete stage; expired
      leases make interrupted runs claimable again.
-   - At this step, runs could be queued and claimed but had no executor;
-     execution is added in step 4, with API scheduling in step 5.
+   - This step defines the durable run state and admission/lease limits used by
+     the executor and dispatcher in steps 4 and 5.
 
 4. **Build the run-execution pipeline — implemented**
-   - Install the project and run `events-worker <run_id>` to execute one
-     queued run. It loads the user's settings snapshot and run state from
-     MongoDB; shared application settings come from `config/settings.json`,
-     and provider credentials come from the environment.
+   - The internal executor loads the user's settings snapshot and run state
+     from MongoDB; shared application settings come from
+     `config/settings.json`, and provider credentials come from the
+     environment.
    - Collection, analysis, and publication run as separate, checkpointed
      stages. Collected posts and extracted events are stored per run so a
      resumed run can continue without repeating completed stages. Post
      analysis reuses the existing Atlas cache.
    - The worker renews its execution lease while stages run. Provider errors
-     are saved in the run report and failure history; publication outputs are
-     written under `output/<user_id>/runs/<run_id>/`.
-   - The API does not launch the executor automatically yet; that integration
-     is step 5.
-   - Support local run execution first. Tests mock provider calls by default.
+     are saved in the run report and failure history; JSON, ICS, and report
+     results are retrieved through run-scoped API routes. Tests mock provider
+     calls by default.
 
-5. **Connect API runs to background execution**
-   - Make run-creation and resume requests schedule work rather than execute
-     long-running tasks in request handlers; runs beyond the configured active
-     capacity remain queued.
-   - Use a local development run executor initially. Add Cloud Run Jobs
-     integration only when deployment is wanted.
+5. **Connect API runs to background execution — implemented**
+   - The FastAPI lifespan starts a local dispatcher. Create and resume
+     requests wake it; a periodic poll also recovers queued work after a
+     process restart.
+   - The dispatcher claims runs up to the configured capacity. Atlas-backed
+     leases enforce the global and per-user limits across API processes.
+   - Cloud Run Jobs integration can be added later if deployment requires it.
 
 6. **Finish API behavior and harden**
-   - Implement run history, run detail, and resume routes.
-   - Standardize validation and error responses; enforce `user_id` scoping in
+   - Run history, detail, resume, and run-scoped result routes are implemented.
+   - Continue standardizing validation and enforcing `user_id` scoping in
      every repository operation.
    - Add integration tests for persistence, concurrency/leases, resuming, and
      user isolation.
    - Add authentication and authorization before exposing the API publicly.
 
 7. **Package and deploy (optional)**
-   - Add one Docker image with separate API and worker entrypoints.
+   - Package the API and its in-process dispatcher in one Docker image.
    - Document local deployment and verify resource, network, and secret
      configuration.
    - Deploy to Cloud Run only when ready: it requires a linked Google Cloud
@@ -173,11 +200,10 @@ not start it automatically yet. The CLI pipeline in
 
 The API and tests can be developed locally with an Atlas free/shared cluster.
 Tests use isolated in-memory database doubles and do not require MongoDB Atlas
-or call Apify/Gemini. For real CLI runs, set `MONGODB_URI` to the Atlas
-connection string; post persistence, analysis caching, and event persistence
-then use that configured database. Live Apify or Gemini requests may incur
-charges; do not run them without intentionally choosing to do so. No Google
-Cloud deployment is needed for local development.
+or call Apify/Gemini. For real API runs, set `MONGODB_URI` to the Atlas
+connection string and configure provider credentials in the environment. Live
+Apify or Gemini requests may incur charges; do not start a run unless you intend
+to make those calls. No Google Cloud deployment is needed for local development.
 
 `user_id` is currently an application-level identifier, not authentication.
 Do not expose this development API as a public multi-user service until an

@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+import os
 from pathlib import Path
+import socket
+from uuid import uuid4
 
 from fastapi import FastAPI
 from pymongo import AsyncMongoClient
@@ -10,16 +13,24 @@ from events.api.routes.runs import router as runs_router
 from events.api.routes.settings import router as settings_router
 from events.config import load_settings
 from events.core.settings import BackendSettings
+from events.dispatcher import RunDispatcher
+from events.executor import RunExecutor
+from events.persistence.events_repository import EventsRepository
 from events.persistence.mongodb import MongoDatabase
+from events.persistence.posts_repository import PostsRepository
+from events.persistence.run_posts_repository import RunPostsRepository
+from events.persistence.runs_repository import RunsRepository
+from events.secrets import Secrets
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backend_settings = BackendSettings()
-    app.state.run_execution_settings = load_settings(
-        Path("config/settings.json")
-    ).run_execution
+    app_settings = load_settings(Path("config/settings.json"))
+    app.state.run_execution_settings = app_settings.run_execution
     app.state.database = None
+    app.state.run_dispatcher = None
+    mongo = None
     if backend_settings.mongodb_uri is not None:
         client = AsyncMongoClient(
             backend_settings.mongodb_uri.get_secret_value()
@@ -32,10 +43,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             raise
         app.state.mongo = mongo
         app.state.database = mongo.database
+        database = mongo.database
+        executor = RunExecutor(
+            runs_repository=RunsRepository(
+                database["runs"],
+                app_settings.run_execution,
+            ),
+            run_posts_repository=RunPostsRepository(
+                database["run_posts"]
+            ),
+            posts_repository=PostsRepository(database["posts"]),
+            events_repository=EventsRepository(database["events"]),
+            settings=app_settings,
+            secrets=Secrets(),
+            worker_id=f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex}",
+        )
+        dispatcher = RunDispatcher(
+            executor,
+            max_concurrent_runs=(
+                app_settings.run_execution.max_concurrent_runs
+            ),
+            poll_interval_seconds=(
+                app_settings.run_execution.dispatch_poll_interval_seconds
+            ),
+        )
+        app.state.run_dispatcher = dispatcher
+        dispatcher.start()
     try:
         yield
     finally:
-        mongo = getattr(app.state, "mongo", None)
+        dispatcher = getattr(app.state, "run_dispatcher", None)
+        if dispatcher is not None:
+            await dispatcher.stop()
         if mongo is not None:
             await mongo.close()
 

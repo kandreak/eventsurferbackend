@@ -6,7 +6,7 @@ import pytest
 
 from events.collectors import InstagramCollector
 from events.collectors.apify import _normalize_post, _render_template
-from events.config import ActorSettings, load_config
+from events.config import ActorSettings, load_settings
 from events.models import SourceConfig
 from pathlib import Path
 
@@ -86,12 +86,20 @@ async def test_apify_collector_renders_input_and_normalizes_actor_results():
 
 def test_configured_actor_templates_render_their_published_input_shapes():
     root = Path(__file__).parents[1]
-    sources, settings = load_config(
-        root / "config" / "user_settings.json",
-        root / "config" / "settings.json",
-    )
+    settings = load_settings(root / "config" / "settings.json")
     source_by_platform = {
-        source.platform: source for source in sources.sources
+        "instagram": SourceConfig(
+            name="Example Instagram Venue",
+            platform="instagram",
+            url="https://www.instagram.com/example_venue/",
+            lookback_days=15,
+        ),
+        "facebook": SourceConfig(
+            name="Example Facebook Venue",
+            platform="facebook",
+            url="https://www.facebook.com/examplevenue",
+            lookback_days=15,
+        ),
     }
 
     instagram = _render_template(

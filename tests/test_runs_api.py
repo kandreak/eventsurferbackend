@@ -6,12 +6,14 @@ from fastapi.testclient import TestClient
 from events.api import app as app_module
 from events.api.app import app
 from events.api.dependencies import (
+    get_run_dispatcher,
+    get_run_posts_repository,
     get_runs_repository,
     get_users_repository,
 )
 from events.api.schemas import StoredRun, UserSettings
 from events.core.settings import BackendSettings
-from events.models import SourceConfig
+from events.models import Event, SourceConfig
 from events.persistence.runs_repository import (
     RunLimitReached,
     RunStateConflict,
@@ -106,6 +108,33 @@ class InMemoryRunsRepository:
         return run
 
 
+class InMemoryRunPostsRepository:
+    def __init__(self) -> None:
+        self.events = [
+            Event(
+                title="Run-scoped concert",
+                date="2026-08-10",
+                confidence=0.9,
+                needs_review=False,
+                date_is_explicit=True,
+                time_is_explicit=False,
+                source_post_url="https://www.instagram.com/p/run-event/",
+                source_name="Example Venue",
+            )
+        ]
+
+    async def list_events(self, run_id: str) -> list[Event]:
+        return self.events
+
+
+class InMemoryRunDispatcher:
+    def __init__(self) -> None:
+        self.notifications = 0
+
+    def notify(self) -> None:
+        self.notifications += 1
+
+
 @pytest.fixture(autouse=True)
 def disable_database_connection(monkeypatch):
     monkeypatch.setattr(
@@ -117,7 +146,13 @@ def disable_database_connection(monkeypatch):
 
 def test_runs_api_creates_lists_scopes_and_resumes_runs():
     runs_repository = InMemoryRunsRepository()
+    run_posts_repository = InMemoryRunPostsRepository()
+    dispatcher = InMemoryRunDispatcher()
     app.dependency_overrides[get_runs_repository] = lambda: runs_repository
+    app.dependency_overrides[get_run_posts_repository] = (
+        lambda: run_posts_repository
+    )
+    app.dependency_overrides[get_run_dispatcher] = lambda: dispatcher
     app.dependency_overrides[get_users_repository] = (
         lambda: InMemoryUsersRepository()
     )
@@ -129,8 +164,33 @@ def test_runs_api_creates_lists_scopes_and_resumes_runs():
             fetched = client.get(
                 f"/api/users/alice/runs/{created.json()['run_id']}"
             )
+            unavailable_events = client.get(
+                f"/api/users/alice/runs/{created.json()['run_id']}/events.json"
+            )
+            unavailable_report = client.get(
+                f"/api/users/alice/runs/{created.json()['run_id']}/report"
+            )
+            runs_repository.runs[0].status = "succeeded"
+            runs_repository.runs[0].report = {"events_extracted": 1}
+            runs_repository.runs[0].checkpoints = {
+                "collect": datetime.now(UTC),
+                "analyze": datetime.now(UTC),
+                "publish": datetime.now(UTC),
+            }
+            run_events = client.get(
+                f"/api/users/alice/runs/{created.json()['run_id']}/events.json"
+            )
+            run_calendar = client.get(
+                f"/api/users/alice/runs/{created.json()['run_id']}/events.ics"
+            )
+            run_report = client.get(
+                f"/api/users/alice/runs/{created.json()['run_id']}/report"
+            )
             wrong_user = client.get(
                 f"/api/users/bob/runs/{created.json()['run_id']}"
+            )
+            wrong_user_events = client.get(
+                f"/api/users/bob/runs/{created.json()['run_id']}/events.json"
             )
             runs_repository.runs[0].status = "failed"
             resumed = client.post(
@@ -145,8 +205,18 @@ def test_runs_api_creates_lists_scopes_and_resumes_runs():
     assert len(listed.json()) == 1
     assert fetched.status_code == 200
     assert wrong_user.status_code == 404
+    assert unavailable_events.status_code == 409
+    assert unavailable_report.status_code == 409
+    assert wrong_user_events.status_code == 404
+    assert [event["title"] for event in run_events.json()] == [
+        "Run-scoped concert"
+    ]
+    assert run_calendar.headers["content-type"].startswith("text/calendar")
+    assert "Run-scoped concert" in run_calendar.text
+    assert run_report.json() == {"events_extracted": 1}
     assert resumed.status_code == 202
     assert resumed.json()["status"] == "queued"
+    assert dispatcher.notifications == 2
 
 
 def test_run_creation_requires_saved_sources():

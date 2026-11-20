@@ -2,24 +2,19 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from events.config import load_config
-from events.models import Event, SocialPost, SourceConfig, SourcesConfig
+from events.api.schemas import UserId, UserSettings
+from events.config import load_settings
+from events.models import Event, SocialPost, SourceConfig
 
 
 ROOT = Path(__file__).parents[1]
 
 
-def test_sample_json_files_load_and_keep_per_source_lookback():
-    sources, settings = load_config(
-        ROOT / "config" / "user_settings.json",
-        ROOT / "config" / "settings.json",
-    )
-
-    assert {source.lookback_days for source in sources.sources} == {15}
+def test_sample_application_settings_load():
+    settings = load_settings(ROOT / "config" / "settings.json")
     assert settings.application.timezone == "Europe/Rome"
-    assert sources.user_id == "user-001"
     assert settings.collection.max_posts_per_source == 30
     assert settings.collection.max_images_per_post == 10
     assert settings.collection.actors["instagram"].id == "apify/instagram-scraper"
@@ -35,6 +30,7 @@ def test_sample_json_files_load_and_keep_per_source_lookback():
     assert settings.run_execution.max_concurrent_runs == 5
     assert settings.run_execution.max_concurrent_runs_per_user == 1
     assert settings.run_execution.max_outstanding_runs_per_user == 1
+    assert settings.run_execution.dispatch_poll_interval_seconds == 1
     assert settings.collection.actors["facebook"].field_map["published_at"] == "createdAt"
 
 
@@ -46,10 +42,7 @@ def test_run_execution_limits_are_validated(tmp_path):
     invalid_path.write_text(json.dumps(data), encoding="utf-8")
 
     with pytest.raises(ValidationError, match="cannot exceed"):
-        load_config(
-            ROOT / "config" / "user_settings.json",
-            invalid_path,
-        )
+        load_settings(invalid_path)
 
 
 def test_run_execution_supports_a_larger_per_user_queue(tmp_path):
@@ -59,32 +52,23 @@ def test_run_execution_supports_a_larger_per_user_queue(tmp_path):
     configured_path = tmp_path / "settings.json"
     configured_path.write_text(json.dumps(data), encoding="utf-8")
 
-    _, settings = load_config(
-        ROOT / "config" / "user_settings.json",
-        configured_path,
-    )
+    settings = load_settings(configured_path)
 
     assert settings.run_execution.max_outstanding_runs_per_user == 3
     assert settings.run_execution.max_concurrent_runs_per_user == 1
 
 
 def test_invalid_json_configuration_is_reported(tmp_path):
-    user_settings_path = tmp_path / "user_settings.json"
-    user_settings_path.write_text("user_id: test-user", encoding="utf-8")
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text("settings: invalid", encoding="utf-8")
 
     with pytest.raises(ValueError, match="Invalid JSON"):
-        load_config(user_settings_path, ROOT / "config" / "settings.json")
+        load_settings(settings_path)
 
 
-def test_user_id_cannot_escape_its_output_directory():
-    sources, _ = load_config(
-        ROOT / "config" / "user_settings.json",
-        ROOT / "config" / "settings.json",
-    )
-    data = sources.model_dump(mode="json")
-    data["user_id"] = "../another-user"
-    with pytest.raises(ValidationError, match="user_id"):
-        SourcesConfig.model_validate(data)
+def test_user_id_cannot_escape_its_api_scope():
+    with pytest.raises(ValidationError, match="pattern"):
+        TypeAdapter(UserId).validate_python("../another-user")
 
 
 def test_source_name_is_optional_and_falls_back_to_the_full_url():
@@ -106,8 +90,7 @@ def test_source_identity_is_name_and_platform_or_url_and_platform():
             lookback_days=30,
         )
 
-    SourcesConfig(
-        user_id="test-user",
+    UserSettings(
         sources=[
             source("Example", "instagram", "https://instagram.com/example/"),
             source("Example", "facebook", "https://facebook.com/example/"),
@@ -116,16 +99,14 @@ def test_source_identity_is_name_and_platform_or_url_and_platform():
         ],
     )
     with pytest.raises(ValidationError, match="name and platform"):
-        SourcesConfig(
-            user_id="test-user",
+        UserSettings(
             sources=[
                 source("Example", "instagram", "https://instagram.com/example/"),
                 source("Example", "instagram", "https://instagram.com/another/"),
             ],
         )
     with pytest.raises(ValidationError, match="name and platform"):
-        SourcesConfig(
-            user_id="test-user",
+        UserSettings(
             sources=[
                 source(None, "instagram", "https://instagram.com/example/"),
                 source(None, "instagram", "https://instagram.com/example/"),
