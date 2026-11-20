@@ -134,17 +134,22 @@ class InMemoryRunPostsRepository:
     def __init__(self, posts):
         self.posts = posts
         self.events = []
+        self.run_user_id = "alice"
 
     async def replace_posts(self, run_id, user_id, posts):
+        assert user_id == self.run_user_id
         self.posts = posts
 
-    async def list_posts(self, run_id):
+    async def list_posts(self, run_id, user_id):
+        assert user_id == self.run_user_id
         return self.posts
 
-    async def replace_events(self, run_id, events):
+    async def replace_events(self, run_id, user_id, events):
+        assert user_id == self.run_user_id
         self.events = events
 
-    async def list_events(self, run_id):
+    async def list_events(self, run_id, user_id):
+        assert user_id == self.run_user_id
         return self.events
 
 

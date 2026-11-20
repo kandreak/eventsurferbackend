@@ -190,7 +190,7 @@ class RunExecutor:
         previous_report: dict[str, Any] | None,
     ) -> dict[str, Any]:
         run = lease.run
-        posts = await self._run_posts.list_posts(run.run_id)
+        posts = await self._run_posts.list_posts(run.run_id, run.user_id)
         report = previous_report or _report_template(
             len(run.settings_snapshot.sources)
         )
@@ -212,7 +212,7 @@ class RunExecutor:
             posts_repository=self._posts,
             user_id=run.user_id,
         )
-        await self._run_posts.replace_events(run.run_id, events)
+        await self._run_posts.replace_events(run.run_id, run.user_id, events)
         await self._events.save_events(run.user_id, events)
         await self._runs.update_report(run.run_id, lease.token, report)
         await self._runs.update_progress(
@@ -239,7 +239,7 @@ class RunExecutor:
         run = lease.run
         if report is None:
             raise RuntimeError("Run report is missing before publication.")
-        events = await self._run_posts.list_events(run.run_id)
+        events = await self._run_posts.list_events(run.run_id, run.user_id)
         await self._runs.update_progress(
             run.run_id,
             lease.token,

@@ -122,8 +122,14 @@ class InMemoryRunPostsRepository:
                 source_name="Example Venue",
             )
         ]
+        self.list_event_calls: list[tuple[str, str]] = []
 
-    async def list_events(self, run_id: str) -> list[Event]:
+    async def list_events(
+        self,
+        run_id: str,
+        user_id: str,
+    ) -> list[Event]:
+        self.list_event_calls.append((run_id, user_id))
         return self.events
 
 
@@ -164,6 +170,7 @@ def test_runs_api_creates_lists_scopes_and_resumes_runs():
             fetched = client.get(
                 f"/api/users/alice/runs/{created.json()['run_id']}"
             )
+            wrong_user_list = client.get("/api/users/bob/runs")
             unavailable_events = client.get(
                 f"/api/users/alice/runs/{created.json()['run_id']}/events.json"
             )
@@ -192,6 +199,15 @@ def test_runs_api_creates_lists_scopes_and_resumes_runs():
             wrong_user_events = client.get(
                 f"/api/users/bob/runs/{created.json()['run_id']}/events.json"
             )
+            wrong_user_calendar = client.get(
+                f"/api/users/bob/runs/{created.json()['run_id']}/events.ics"
+            )
+            wrong_user_report = client.get(
+                f"/api/users/bob/runs/{created.json()['run_id']}/report"
+            )
+            wrong_user_resume = client.post(
+                f"/api/users/bob/runs/{created.json()['run_id']}/resume"
+            )
             runs_repository.runs[0].status = "failed"
             resumed = client.post(
                 f"/api/users/alice/runs/{created.json()['run_id']}/resume"
@@ -204,10 +220,14 @@ def test_runs_api_creates_lists_scopes_and_resumes_runs():
     assert rejected.status_code == 409
     assert len(listed.json()) == 1
     assert fetched.status_code == 200
+    assert wrong_user_list.json() == []
     assert wrong_user.status_code == 404
     assert unavailable_events.status_code == 409
     assert unavailable_report.status_code == 409
     assert wrong_user_events.status_code == 404
+    assert wrong_user_calendar.status_code == 404
+    assert wrong_user_report.status_code == 404
+    assert wrong_user_resume.status_code == 404
     assert [event["title"] for event in run_events.json()] == [
         "Run-scoped concert"
     ]
@@ -217,6 +237,10 @@ def test_runs_api_creates_lists_scopes_and_resumes_runs():
     assert resumed.status_code == 202
     assert resumed.json()["status"] == "queued"
     assert dispatcher.notifications == 2
+    assert run_posts_repository.list_event_calls == [
+        ("run-1", "alice"),
+        ("run-1", "alice"),
+    ]
 
 
 def test_run_creation_requires_saved_sources():

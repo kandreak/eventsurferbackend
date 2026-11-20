@@ -55,6 +55,7 @@ def test_settings_api_creates_updates_and_scopes_settings_by_user():
                 json={"timezone": "UTC", "sources": []},
             )
             fetched = client.get("/api/users/alice/settings")
+            fetched_bob = client.get("/api/users/bob/settings")
             missing = client.get("/api/users/unknown/settings")
     finally:
         app.dependency_overrides.clear()
@@ -63,6 +64,7 @@ def test_settings_api_creates_updates_and_scopes_settings_by_user():
     assert second.status_code == 200
     assert fetched.json()["sources"][0]["lookback_days"] == 14
     assert fetched.json()["timezone"] == "Europe/Rome"
+    assert fetched_bob.json() == {"timezone": "UTC", "sources": []}
     assert missing.status_code == 404
 
 

@@ -108,7 +108,7 @@ async def get_user_run_events(
             status_code=status.HTTP_409_CONFLICT,
             detail="Run events are not available until analysis completes.",
         )
-    return await run_posts_repository.list_events(run_id)
+    return await run_posts_repository.list_events(run_id, user_id)
 
 
 @router.get(
@@ -132,7 +132,7 @@ async def get_user_run_calendar(
             status_code=status.HTTP_409_CONFLICT,
             detail="Run events are not available until analysis completes.",
         )
-    events = await run_posts_repository.list_events(run_id)
+    events = await run_posts_repository.list_events(run_id, user_id)
     return Response(
         content=serialize_calendar(events, run.settings_snapshot.timezone),
         media_type="text/calendar",

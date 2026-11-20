@@ -194,10 +194,17 @@ separate command or process.
    - Calendar export returns `404` when user settings are missing instead of
      silently assuming a timezone.
 
-7. **Verify user scoping**
-   - Audit every repository operation that reads or writes user-owned data.
-   - Add tests proving that one user's settings, runs, posts, events, and
-     run-scoped results cannot be accessed through another user's ID.
+7. **Verify user scoping — implemented**
+   - Settings, cached posts, and events use `user_id` in their repository
+     reads and writes. Run listing, lookup, and resume operations also filter
+     by both user and run ID.
+   - Run-scoped posts and events are now filtered by both `user_id` and
+     `run_id`; result routes first verify that the run belongs to the
+     requested user.
+   - Tests cover cross-user settings, post-cache isolation, event queries,
+     run listing and actions, and run-scoped JSON, ICS, and report results.
+   - This is data scoping, not authentication: `user_id` remains
+     caller-supplied until step 9 is implemented.
 
 8. **Add Atlas integration coverage**
    - Add opt-in integration tests for persistence, admission limits,
