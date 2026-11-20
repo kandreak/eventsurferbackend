@@ -181,20 +181,44 @@ separate command or process.
      leases enforce the global and per-user limits across API processes.
    - Cloud Run Jobs integration can be added later if deployment requires it.
 
-6. **Finish API behavior and harden**
-   - Run history, detail, resume, and run-scoped result routes are implemented.
-   - Continue standardizing validation and enforcing `user_id` scoping in
-     every repository operation.
-   - Add integration tests for persistence, concurrency/leases, resuming, and
-     user isolation.
-   - Add authentication and authorization before exposing the API publicly.
+6. **Standardize API validation and errors**
+   - Use consistent response shapes and status codes for invalid input,
+     missing resources, conflicts, and unavailable services.
+   - Make malformed persisted data and unexpected repository failures visible
+     without returning success-shaped fallbacks.
 
-7. **Package and deploy (optional)**
-   - Package the API and its in-process dispatcher in one Docker image.
-   - Document local deployment and verify resource, network, and secret
-     configuration.
-   - Deploy to Cloud Run only when ready: it requires a linked Google Cloud
-     billing account, and free allowances do not guarantee zero cost.
+7. **Verify user scoping**
+   - Audit every repository operation that reads or writes user-owned data.
+   - Add tests proving that one user's settings, runs, posts, events, and
+     run-scoped results cannot be accessed through another user's ID.
+
+8. **Add Atlas integration coverage**
+   - Add opt-in integration tests for persistence, admission limits,
+     concurrent claims, lease renewal/expiry, stage checkpoints, and resume.
+   - Keep the ordinary test suite isolated from Atlas and mock Apify/Gemini;
+     integration tests must use dedicated test records and clean them up.
+
+9. **Add authentication and authorization**
+   - Choose an identity provider and map verified identities to application
+     users.
+   - Enforce authorization on settings, runs, events, and result routes.
+   - Complete this before exposing the API as a public multi-user service.
+
+10. **Package the API (optional)**
+    - Create one Docker image with the FastAPI app and its in-process
+      dispatcher; do not add a separate worker entrypoint.
+    - Add a deployment health check and ensure shutdown lets active leases
+      expire safely for recovery.
+
+11. **Document and verify local deployment**
+    - Document required environment variables, settings, and startup steps.
+    - Verify database connectivity, provider configuration, health checks, and
+      request/result flows in the packaged environment.
+
+12. **Deploy to Cloud Run (optional)**
+    - Deploy only when cloud hosting is wanted and authentication is in place.
+    - Configure billing, networking, secrets, and service resources explicitly;
+      free allowances do not guarantee zero cost.
 
 ## Cost-conscious development
 
