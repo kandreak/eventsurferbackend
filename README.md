@@ -54,9 +54,11 @@ ignored by Git. Then start the API:
 uvicorn events.api.app:app --reload
 ```
 
-The local API is available at `http://127.0.0.1:8000`; interactive docs are at
-`/docs`. When `MONGODB_URI` is not configured, health checks still work, while
-database-backed routes return `503 Service Unavailable`.
+The local API is available at `http://127.0.0.1:8000`. Swagger UI is available
+at `/docs`, where you can explore the endpoints and send requests; the raw
+OpenAPI schema is at `/openapi.json`. When `MONGODB_URI` is not configured,
+health checks still work, while database-backed routes return
+`503 Service Unavailable`.
 
 Save a user's sources, then start a run through the API:
 
