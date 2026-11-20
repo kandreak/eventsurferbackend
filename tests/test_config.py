@@ -31,6 +31,8 @@ def test_sample_application_settings_load():
     assert settings.run_execution.max_concurrent_runs_per_user == 1
     assert settings.run_execution.max_outstanding_runs_per_user == 1
     assert settings.run_execution.dispatch_poll_interval_seconds == 1
+    assert settings.user_limits.max_sources_per_user == 10
+    assert settings.user_limits.max_runs_per_user_per_week == 10
     assert settings.collection.actors["facebook"].field_map["published_at"] == "createdAt"
 
 

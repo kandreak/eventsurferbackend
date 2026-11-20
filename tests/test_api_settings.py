@@ -6,6 +6,7 @@ from events.api.app import app
 from events.api.dependencies import get_users_repository
 from events.api.schemas import UserSettings
 from events.core.settings import BackendSettings
+from events.persistence.users_repository import SourceLimitReached
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +28,10 @@ class InMemoryUsersRepository:
     async def put_settings(
         self, user_id: str, settings: UserSettings
     ) -> UserSettings:
+        if len(settings.sources) > 10:
+            raise SourceLimitReached(
+                "A user can configure at most 10 social sources."
+            )
         self.settings[user_id] = settings
         return settings
 
@@ -81,6 +86,34 @@ def test_settings_api_rejects_invalid_settings():
         app.dependency_overrides.clear()
 
     assert response.status_code == 422
+
+
+def test_settings_api_rejects_more_than_the_configured_source_limit():
+    repository = InMemoryUsersRepository()
+    app.dependency_overrides[get_users_repository] = lambda: repository
+    sources = [
+        {
+            "name": f"Venue {index}",
+            "platform": "instagram",
+            "url": f"https://www.instagram.com/venue-{index}/",
+            "lookback_days": 7,
+        }
+        for index in range(11)
+    ]
+    try:
+        with TestClient(app) as client:
+            response = client.put(
+                "/api/users/alice/settings",
+                json={"timezone": "UTC", "sources": sources},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert response.json()["error"]["message"] == (
+        "A user can configure at most 10 social sources."
+    )
+    assert "alice" not in repository.settings
 
 
 def test_database_routes_return_503_when_mongodb_is_not_configured(monkeypatch):

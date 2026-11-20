@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, status
 from pymongo.asynchronous.database import AsyncDatabase
 
-from events.config import RunExecutionSettings
+from events.config import RunExecutionSettings, UserLimits
 from events.dispatcher import RunDispatcher
 from events.persistence.events_repository import EventsRepository
 from events.persistence.run_posts_repository import RunPostsRepository
@@ -21,10 +21,25 @@ def get_database(request: Request) -> AsyncDatabase:
     return database
 
 
+def get_user_limits(request: Request) -> UserLimits:
+    settings: UserLimits | None = getattr(
+        request.app.state,
+        "user_limits",
+        None,
+    )
+    if settings is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="User limits are not configured.",
+        )
+    return settings
+
+
 def get_users_repository(
     database: Annotated[AsyncDatabase, Depends(get_database)],
+    user_limits: Annotated[UserLimits, Depends(get_user_limits)],
 ) -> UsersRepository:
-    return UsersRepository(database["users"])
+    return UsersRepository(database["users"], user_limits)
 
 
 def get_events_repository(
@@ -51,7 +66,7 @@ def get_runs_repository(request: Request) -> RunsRepository:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Run execution is not configured.",
         )
-    return RunsRepository(database["runs"], settings)
+    return RunsRepository(database["runs"], settings, get_user_limits(request))
 
 
 def get_run_dispatcher(request: Request) -> RunDispatcher | None:

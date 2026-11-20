@@ -27,6 +27,7 @@ API_ERROR_RESPONSES = {
         (404, "Resource not found."),
         (409, "Request conflicts with current state."),
         (422, "Request validation failed."),
+        (429, "User run limit reached."),
         (500, "Unexpected server error."),
         (503, "Required service is unavailable."),
     )

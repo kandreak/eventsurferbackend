@@ -8,12 +8,13 @@ import pytest_asyncio
 from pymongo import AsyncMongoClient
 
 from events.api.schemas import RunProgress, StoredRun, UserSettings
-from events.config import RunExecutionSettings
+from events.config import RunExecutionSettings, UserLimits
 from events.core.settings import BackendSettings
 from events.persistence.mongodb import MongoDatabase
 from events.persistence.runs_repository import (
     RunLeaseLost,
     RunLimitReached,
+    RunWeeklyLimitReached,
     RunsRepository,
 )
 from events.persistence.users_repository import UsersRepository
@@ -69,9 +70,20 @@ def _user_id() -> str:
     return f"atlas-test-{uuid4().hex}"
 
 
+def _user_limits(
+    *,
+    max_sources_per_user: int = 10,
+    max_runs_per_user_per_week: int = 10,
+) -> UserLimits:
+    return UserLimits(
+        max_sources_per_user=max_sources_per_user,
+        max_runs_per_user_per_week=max_runs_per_user_per_week,
+    )
+
+
 @pytest.mark.asyncio
 async def test_user_settings_persist_and_remain_user_scoped(atlas_database):
-    repository = UsersRepository(atlas_database["users"])
+    repository = UsersRepository(atlas_database["users"], _user_limits())
     user_id = _user_id()
     settings = UserSettings(timezone="UTC")
 
@@ -90,6 +102,7 @@ async def test_outstanding_run_limit_is_atomic_and_runs_are_user_scoped(
     repository = RunsRepository(
         atlas_database["runs"],
         _run_settings(max_outstanding_runs_per_user=1),
+        _user_limits(),
     )
 
     results = await asyncio.gather(
@@ -116,10 +129,63 @@ async def test_outstanding_run_limit_is_atomic_and_runs_are_user_scoped(
 
 
 @pytest.mark.asyncio
+async def test_rolling_weekly_run_limit_is_atomic_and_resume_is_exempt(
+    atlas_database,
+):
+    user_id = _user_id()
+    repository = RunsRepository(
+        atlas_database["runs"],
+        _run_settings(max_outstanding_runs_per_user=10),
+        _user_limits(max_runs_per_user_per_week=1),
+    )
+    results = await asyncio.gather(
+        repository.create_run(user_id, UserSettings()),
+        repository.create_run(user_id, UserSettings()),
+        return_exceptions=True,
+    )
+
+    created = [result for result in results if isinstance(result, StoredRun)]
+    rejected = [
+        result
+        for result in results
+        if isinstance(result, RunWeeklyLimitReached)
+    ]
+    assert len(created) == 1
+    assert len(rejected) == 1
+
+    lease = await repository.claim_next_run("atlas-weekly-worker")
+    assert lease is not None
+    assert lease.run.run_id == created[0].run_id
+    failed = await repository.fail_run(
+        lease.run.run_id,
+        lease.token,
+        message="test failure",
+        error_type="TestFailure",
+    )
+    assert failed.status == "failed"
+    with pytest.raises(RunWeeklyLimitReached):
+        await repository.create_run(user_id, UserSettings())
+
+    old_created_at = datetime.now(UTC) - timedelta(weeks=1, seconds=1)
+    await atlas_database["runs"].update_one(
+        {"run_id": created[0].run_id},
+        {"$set": {"created_at": old_created_at}},
+    )
+    next_run = await repository.create_run(user_id, UserSettings())
+    resumed = await repository.resume_run(user_id, created[0].run_id)
+
+    assert next_run.run_id != created[0].run_id
+    assert resumed is not None
+    assert resumed.status == "queued"
+    assert resumed.run_id == created[0].run_id
+
+
+@pytest.mark.asyncio
 async def test_global_execution_slots_limit_concurrent_claims(atlas_database):
     repository = RunsRepository(
         atlas_database["runs"],
         _run_settings(max_concurrent_runs=1),
+        _user_limits(),
     )
     first_user, second_user = _user_id(), _user_id()
     first = await repository.create_run(first_user, UserSettings())
@@ -147,6 +213,7 @@ async def test_heartbeat_renews_lease_and_expired_lease_can_be_reclaimed(
             max_concurrent_runs=1,
             lease_duration_seconds=60,
         ),
+        _user_limits(),
     )
     user_id = _user_id()
     run = await repository.create_run(user_id, UserSettings())
@@ -197,6 +264,7 @@ async def test_stage_checkpoints_persist_and_resume_at_incomplete_stage(
     repository = RunsRepository(
         atlas_database["runs"],
         _run_settings(max_concurrent_runs=1),
+        _user_limits(),
     )
     run = await repository.create_run(user_id, UserSettings())
     lease = await repository.claim_next_run("atlas-worker-one")

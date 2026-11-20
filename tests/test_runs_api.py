@@ -17,6 +17,7 @@ from events.models import Event, SourceConfig
 from events.persistence.runs_repository import (
     RunLimitReached,
     RunStateConflict,
+    RunWeeklyLimitReached,
 )
 
 
@@ -285,3 +286,33 @@ def test_configured_outstanding_limit_allows_queued_runs_up_to_the_limit():
         202,
         409,
     ]
+
+
+def test_run_creation_returns_429_when_the_weekly_limit_is_reached():
+    class WeeklyLimitRunsRepository(InMemoryRunsRepository):
+        async def create_run(
+            self,
+            user_id: str,
+            settings_snapshot: UserSettings,
+        ) -> StoredRun:
+            raise RunWeeklyLimitReached
+
+    app.dependency_overrides[get_runs_repository] = (
+        lambda: WeeklyLimitRunsRepository()
+    )
+    app.dependency_overrides[get_users_repository] = (
+        lambda: InMemoryUsersRepository()
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/users/alice/runs")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 429
+    assert response.json() == {
+        "error": {
+            "code": "rate_limited",
+            "message": "The user's rolling 7-day run limit has been reached.",
+        }
+    }

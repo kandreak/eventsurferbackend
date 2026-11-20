@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backend_settings = BackendSettings()
     app_settings = load_settings(Path("config/settings.json"))
     app.state.run_execution_settings = app_settings.run_execution
+    app.state.user_limits = app_settings.user_limits
     app.state.database = None
     app.state.run_dispatcher = None
     mongo = None
@@ -59,6 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             runs_repository=RunsRepository(
                 database["runs"],
                 app_settings.run_execution,
+                app_settings.user_limits,
             ),
             run_posts_repository=RunPostsRepository(
                 database["run_posts"]

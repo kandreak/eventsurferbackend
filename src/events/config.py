@@ -88,6 +88,13 @@ class RunExecutionSettings(BaseModel):
         return self
 
 
+class UserLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_sources_per_user: int = Field(default=10, gt=0)
+    max_runs_per_user_per_week: int = Field(default=10, gt=0)
+
+
 class SettingsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -95,6 +102,7 @@ class SettingsConfig(BaseModel):
     collection: CollectionSettings
     ai: AISettings
     run_execution: RunExecutionSettings
+    user_limits: UserLimits = Field(default_factory=UserLimits)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

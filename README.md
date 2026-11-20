@@ -122,6 +122,10 @@ separate command or process.
      `config/settings.json`), not hard-coded:
      ```json
      {
+       "user_limits": {
+         "max_sources_per_user": 10,
+         "max_runs_per_user_per_week": 10
+       },
        "run_execution": {
          "max_concurrent_runs": 5,
          "max_concurrent_runs_per_user": 1,
@@ -131,6 +135,12 @@ separate command or process.
        }
      }
      ```
+     `max_sources_per_user` limits configured social pages; an update above
+     the cap returns `422 Unprocessable Entity`.
+     `max_runs_per_user_per_week` counts newly created runs in a rolling
+     seven-day window, regardless of outcome. Hitting this cap returns
+     `429 Too Many Requests`; resuming a failed run does not consume another
+     weekly slot.
      `max_concurrent_runs` limits runs executing globally;
      `max_concurrent_runs_per_user` limits runs executing for one user; and
      `max_outstanding_runs_per_user` limits that user's queued plus running
@@ -189,7 +199,8 @@ separate command or process.
      field locations, safe messages, and validation types.
    - Expected HTTP failures preserve their status codes; invalid requests use
      `422`, missing resources use `404`, state conflicts use `409`, and
-     unavailable MongoDB services use `503`.
+     exhausted weekly run limits use `429`; unavailable MongoDB services use
+     `503`.
    - Invalid persisted Pydantic data and unexpected exceptions are logged and
      return sanitized `500` responses. MongoDB exceptions are logged and
      reported as `503`; exception details are not sent to clients.

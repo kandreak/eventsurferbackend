@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Path, status
 from events.api.dependencies import UsersRepositoryDependency
 from events.api.errors import API_ERROR_RESPONSES
 from events.api.schemas import UserId, UserSettings
+from events.persistence.users_repository import SourceLimitReached
 
 router = APIRouter(
     prefix="/api/users",
@@ -33,4 +34,10 @@ async def put_user_settings(
     settings: UserSettings,
     repository: UsersRepositoryDependency,
 ) -> UserSettings:
-    return await repository.put_settings(user_id, settings)
+    try:
+        return await repository.put_settings(user_id, settings)
+    except SourceLimitReached as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc

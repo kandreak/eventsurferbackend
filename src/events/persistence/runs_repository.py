@@ -13,7 +13,7 @@ from events.api.schemas import (
     StoredRun,
     UserSettings,
 )
-from events.config import RunExecutionSettings
+from events.config import RunExecutionSettings, UserLimits
 
 _STAGES: tuple[RunStage, ...] = ("collect", "analyze", "publish")
 _PRIVATE_FIELDS = {
@@ -28,6 +28,10 @@ _PRIVATE_FIELDS = {
 
 
 class RunLimitReached(Exception):
+    pass
+
+
+class RunWeeklyLimitReached(Exception):
     pass
 
 
@@ -50,6 +54,7 @@ class RunsRepository:
         self,
         collection: AsyncCollection[dict[str, Any]],
         settings: RunExecutionSettings,
+        user_limits: UserLimits,
     ) -> None:
         self._collection = collection
         self._database = collection.database
@@ -61,6 +66,7 @@ class RunsRepository:
             "run_execution_slots"
         ]
         self._settings = settings
+        self._user_limits = user_limits
 
     @staticmethod
     def _to_model(document: dict[str, Any]) -> StoredRun:
@@ -116,6 +122,26 @@ class RunsRepository:
                 f"Outstanding run counter is missing for user {user_id}."
             )
 
+    async def _check_weekly_run_limit(
+        self,
+        user_id: str,
+        *,
+        now: datetime,
+        session: Any,
+    ) -> None:
+        count = await self._collection.count_documents(
+            {
+                "user_id": user_id,
+                "created_at": {
+                    "$gte": now - timedelta(weeks=1),
+                    "$lte": now,
+                },
+            },
+            session=session,
+        )
+        if count >= self._user_limits.max_runs_per_user_per_week:
+            raise RunWeeklyLimitReached
+
     async def create_run(
         self,
         user_id: str,
@@ -141,6 +167,11 @@ class RunsRepository:
 
         async def transaction(session: Any) -> StoredRun:
             await self._increment_outstanding(user_id, session=session)
+            await self._check_weekly_run_limit(
+                user_id,
+                now=now,
+                session=session,
+            )
             await self._collection.insert_one(document, session=session)
             return self._to_model(document)
 

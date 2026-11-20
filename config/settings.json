@@ -55,6 +55,10 @@
     "max_concurrent_requests": 2,
     "max_retries": 1
   },
+  "user_limits": {
+    "max_sources_per_user": 10,
+    "max_runs_per_user_per_week": 10
+  },
   "run_execution": {
     "max_concurrent_runs": 5,
     "max_concurrent_runs_per_user": 1,

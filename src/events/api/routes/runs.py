@@ -15,6 +15,7 @@ from events.models import Event
 from events.persistence.runs_repository import (
     RunLimitReached,
     RunStateConflict,
+    RunWeeklyLimitReached,
 )
 
 router = APIRouter(
@@ -48,6 +49,11 @@ async def create_user_run(
         )
     try:
         run = await runs_repository.create_run(user_id, settings)
+    except RunWeeklyLimitReached as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="The user's rolling 7-day run limit has been reached.",
+        ) from exc
     except RunLimitReached as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
