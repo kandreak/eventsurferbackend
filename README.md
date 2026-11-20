@@ -206,11 +206,21 @@ separate command or process.
    - This is data scoping, not authentication: `user_id` remains
      caller-supplied until step 9 is implemented.
 
-8. **Add Atlas integration coverage**
-   - Add opt-in integration tests for persistence, admission limits,
-     concurrent claims, lease renewal/expiry, stage checkpoints, and resume.
-   - Keep the ordinary test suite isolated from Atlas and mock Apify/Gemini;
-     integration tests must use dedicated test records and clean them up.
+8. **Add Atlas integration coverage — implemented**
+   - Opt-in tests exercise settings and run persistence, atomic admission
+     limits, concurrent claims, lease renewal/expiry, stage checkpoints, and
+     resume against real MongoDB transactions.
+   - The default test suite skips these tests. To run them, configure
+     `MONGODB_URI` in `.env` and opt in explicitly:
+     ```powershell
+     $env:RUN_ATLAS_INTEGRATION_TESTS = "1"
+     python -m pytest tests/integration
+     Remove-Item Env:RUN_ATLAS_INTEGRATION_TESTS
+     ```
+   - Each test creates and drops its own randomly named temporary database;
+     no existing application records are touched. The Atlas database user
+     needs permission to create and drop databases. Tests never call
+     Apify/Gemini.
 
 9. **Add authentication and authorization**
    - Choose an identity provider and map verified identities to application
