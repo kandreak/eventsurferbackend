@@ -73,6 +73,14 @@ async def test_apify_collector_renders_input_and_normalizes_actor_results():
     assert [str(url) for url in result.posts[0].media_urls] == [
         "https://cdn.example/image.jpg"
     ]
+    assert result.posts[0].raw_provider_data == {
+        "id": 123,
+        "permalink": "https://www.instagram.com/p/abc/",
+        "caption": "An announcement",
+        "created": {"timestamp": "2026-11-18T10:00:00Z"},
+        "media": {"images": ["https://cdn.example/image.jpg"]},
+    }
+    assert "raw_provider_data" not in result.posts[0].model_dump(mode="json")
     assert not result.truncated
 
 

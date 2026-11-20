@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
 import logging
 from pathlib import Path
@@ -10,12 +9,19 @@ from typing import Any, Literal, Sequence
 
 from apify_client import ApifyClientAsync
 from pydantic import ValidationError
+from pymongo import AsyncMongoClient
 
 from events.ai import GeminiExtractor
 from events.calendar_export import serialize_calendar
 from events.collectors import FacebookCollector, InstagramCollector
 from events.config import ActorSettings, SettingsConfig, load_config
+from events.core.settings import BackendSettings
 from events.models import Event, SocialPost, SourceConfig
+from events.persistence.mongodb import MongoDatabase
+from events.persistence.posts_repository import (
+    PostsRepository,
+    analysis_content_hash,
+)
 from events.processing import deduplicate_events, execution_now, filter_recent_posts
 from events.reporting import write_outputs
 from events.secrets import Secrets
@@ -133,6 +139,9 @@ async def _collect_posts(
     sources: list[SourceConfig],
     settings: SettingsConfig,
     secrets: Secrets,
+    *,
+    posts_repository: PostsRepository | None = None,
+    user_id: str | None = None,
 ) -> tuple[list[SocialPost], dict[str, Any]]:
     collection = settings.collection
     report = _report_template(len(sources))
@@ -185,6 +194,20 @@ async def _collect_posts(
             "APIFY_API_TOKEN is not set; no sources could be collected."
         )
     report["posts_in_lookback"] = len(posts)
+    if posts_repository is not None:
+        if user_id is None:
+            raise ValueError("A user_id is required when persisting posts.")
+        for post in posts:
+            await posts_repository.upsert_post(
+                user_id,
+                post,
+                content_hash=_post_cache_key(
+                    post,
+                    model=settings.ai.model,
+                    timezone=settings.application.timezone,
+                    max_images=collection.max_images_per_post,
+                ),
+            )
     return posts, report
 
 
@@ -195,15 +218,12 @@ def _post_cache_key(
     timezone: str,
     max_images: int,
 ) -> str:
-    value = {
-        "post": post.model_dump(mode="json"),
-        "model": model,
-        "timezone": timezone,
-        "max_images": max_images,
-    }
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
+    return analysis_content_hash(
+        post,
+        model=model,
+        timezone=timezone,
+        max_images=max_images,
+    )
 
 
 async def _analyze_posts(
@@ -212,36 +232,65 @@ async def _analyze_posts(
     settings: SettingsConfig,
     secrets: Secrets,
     cache_path: Path,
+    *,
+    posts_repository: PostsRepository | None = None,
+    user_id: str | None = None,
 ) -> tuple[list[Event], dict[str, Any]]:
     ai_settings = settings.ai
     collection = settings.collection
-    cache = (
-        _read_json(cache_path)
-        if cache_path.exists()
-        else {"version": _CACHE_VERSION, "entries": {}}
-    )
-    if cache.get("version") != _CACHE_VERSION or not isinstance(
-        cache.get("entries"), dict
-    ):
-        raise ValueError(f"Unsupported or invalid analysis cache: {cache_path}")
+    if posts_repository is not None and user_id is None:
+        raise ValueError("A user_id is required when persisting posts.")
+    cache = {"version": _CACHE_VERSION, "entries": {}}
+    if posts_repository is None:
+        cache = (
+            _read_json(cache_path)
+            if cache_path.exists()
+            else {"version": _CACHE_VERSION, "entries": {}}
+        )
+        if cache.get("version") != _CACHE_VERSION or not isinstance(
+            cache.get("entries"), dict
+        ):
+            raise ValueError(f"Unsupported or invalid analysis cache: {cache_path}")
     entries: dict[str, Any] = cache["entries"]
     events_by_post: dict[str, list[Event]] = {}
     analyzable: list[SocialPost] = []
     for post in posts:
-        if not (post.caption or post.media_urls):
-            report["posts_skipped"] += 1
-            report["warnings"].append(
-                f"Skipped post {post.external_id} from {post.source_name}: "
-                "no caption or image."
-            )
-            continue
         key = _post_cache_key(
             post,
             model=ai_settings.model,
             timezone=settings.application.timezone,
             max_images=collection.max_images_per_post,
         )
-        if key in entries:
+        if not (post.caption or post.media_urls):
+            report["posts_skipped"] += 1
+            report["warnings"].append(
+                f"Skipped post {post.external_id} from {post.source_name}: "
+                "no caption or image."
+            )
+            if posts_repository is not None:
+                await posts_repository.upsert_post(
+                    user_id,
+                    post,
+                    content_hash=key,
+                )
+                await posts_repository.mark_skipped(
+                    user_id,
+                    post,
+                    content_hash=key,
+                    reason="Post has no caption or image.",
+                )
+            continue
+        if posts_repository is not None:
+            cached_events = await posts_repository.upsert_post(
+                user_id,
+                post,
+                content_hash=key,
+            )
+            if cached_events is not None:
+                events_by_post[key] = cached_events
+                report["posts_cached"] += 1
+                continue
+        elif key in entries:
             events_by_post[key] = [
                 Event.model_validate(item) for item in entries[key]
             ]
@@ -251,10 +300,22 @@ async def _analyze_posts(
 
     report["posts_analyzed"] = len(analyzable)
     if analyzable and not secrets.gemini_api_key:
-        report["post_errors"].append(
-            "GEMINI_API_KEY is not set; retrieved posts were not analyzed."
-        )
+        error = "GEMINI_API_KEY is not set; retrieved posts were not analyzed."
+        report["post_errors"].append(error)
         report["posts_skipped"] += len(analyzable)
+        if posts_repository is not None:
+            for post in analyzable:
+                await posts_repository.mark_analysis_failed(
+                    user_id,
+                    post,
+                    content_hash=_post_cache_key(
+                        post,
+                        model=ai_settings.model,
+                        timezone=settings.application.timezone,
+                        max_images=collection.max_images_per_post,
+                    ),
+                    error=error,
+                )
     elif analyzable and secrets.gemini_api_key:
         extractor = GeminiExtractor(
             secrets.gemini_api_key,
@@ -297,12 +358,36 @@ async def _analyze_posts(
                         )
                         logger.error("Event extraction failed for %s", message)
                         report["post_errors"].append(message)
+                        if posts_repository is not None:
+                            await posts_repository.mark_analysis_failed(
+                                user_id,
+                                post,
+                                content_hash=_post_cache_key(
+                                    post,
+                                    model=ai_settings.model,
+                                    timezone=settings.application.timezone,
+                                    max_images=collection.max_images_per_post,
+                                ),
+                                error=str(result_group),
+                            )
                     continue
                 for post, result in zip(group, result_group, strict=True):
                     if isinstance(result, Exception):
                         message = f"{post.source_name} / {post.external_id}: {result}"
                         logger.error("Event extraction failed for %s", message)
                         report["post_errors"].append(message)
+                        if posts_repository is not None:
+                            await posts_repository.mark_analysis_failed(
+                                user_id,
+                                post,
+                                content_hash=_post_cache_key(
+                                    post,
+                                    model=ai_settings.model,
+                                    timezone=settings.application.timezone,
+                                    max_images=collection.max_images_per_post,
+                                ),
+                                error=str(result),
+                            )
                         continue
                     key = _post_cache_key(
                         post,
@@ -311,13 +396,22 @@ async def _analyze_posts(
                         max_images=collection.max_images_per_post,
                     )
                     events_by_post[key] = result
-                    entries[key] = [
-                        event.model_dump(mode="json") for event in result
-                    ]
+                    if posts_repository is not None:
+                        await posts_repository.mark_analyzed(
+                            user_id,
+                            post,
+                            content_hash=key,
+                            events=result,
+                        )
+                    else:
+                        entries[key] = [
+                            event.model_dump(mode="json") for event in result
+                        ]
         finally:
             await extractor.close()
 
-    _write_json(cache_path, cache)
+    if posts_repository is None:
+        _write_json(cache_path, cache)
     events = [
         event
         for post in posts
@@ -363,57 +457,87 @@ async def _run(
     analysis_path = output_directory / "analysis.json"
     cache_path = output_directory / "analysis_cache.json"
 
-    if stage in ("all", "collect"):
-        posts, report = await _collect_posts(sources, settings, secrets)
-        _write_json(
-            posts_path,
-            {
-                "posts": [post.model_dump(mode="json") for post in posts],
-                "report": report,
-            },
+    backend_settings = BackendSettings()
+    mongo: MongoDatabase | None = None
+    posts_repository: PostsRepository | None = None
+    if (
+        stage in ("all", "collect", "analyze")
+        and backend_settings.mongodb_uri is not None
+    ):
+        client = AsyncMongoClient(
+            backend_settings.mongodb_uri.get_secret_value()
         )
-    if stage in ("all", "analyze"):
-        scrape = _read_json(posts_path)
-        posts = [SocialPost.model_validate(post) for post in scrape["posts"]]
-        events, report = await _analyze_posts(
-            posts,
-            scrape["report"],
-            settings,
-            secrets,
-            cache_path,
-        )
-        _write_json(
-            analysis_path,
-            {
-                "events": [event.model_dump(mode="json") for event in events],
-                "report": report,
-            },
-        )
-    if stage in ("all", "publish"):
-        analysis = _read_json(analysis_path)
-        events = [Event.model_validate(event) for event in analysis["events"]]
-        report = analysis["report"]
-        written = write_outputs(
-            output_directory=output_directory,
-            calendar_filename=settings.calendar.filename,
-            calendar_data=serialize_calendar(
-                events, settings.application.timezone
-            ),
-            events=events,
-            report=report,
-            json_enabled=settings.reporting.json_enabled,
-            text_report_enabled=settings.reporting.text_report_enabled,
-        )
-        print(
-            f"Results: {report['posts_in_lookback']} posts in lookback, "
-            f"{len(events)} events, {report['duplicates_removed']} "
-            "duplicates removed."
-        )
-        for path in written:
-            print(f"Generated: {path}")
-    if report["source_errors"] or report["post_errors"]:
-        return 1
-    return 0
+        mongo = MongoDatabase(client, backend_settings.mongodb_database)
+        try:
+            await mongo.initialize()
+        except Exception:
+            await mongo.close()
+            raise
+        posts_repository = PostsRepository(mongo.database["posts"])
+
+    try:
+        if stage in ("all", "collect"):
+            posts, report = await _collect_posts(
+                sources,
+                settings,
+                secrets,
+                posts_repository=posts_repository,
+                user_id=sources_config.user_id,
+            )
+            _write_json(
+                posts_path,
+                {
+                    "posts": [post.model_dump(mode="json") for post in posts],
+                    "report": report,
+                },
+            )
+        if stage in ("all", "analyze"):
+            scrape = _read_json(posts_path)
+            posts = [SocialPost.model_validate(post) for post in scrape["posts"]]
+            events, report = await _analyze_posts(
+                posts,
+                scrape["report"],
+                settings,
+                secrets,
+                cache_path,
+                posts_repository=posts_repository,
+                user_id=sources_config.user_id,
+            )
+            _write_json(
+                analysis_path,
+                {
+                    "events": [event.model_dump(mode="json") for event in events],
+                    "report": report,
+                },
+            )
+        if stage in ("all", "publish"):
+            analysis = _read_json(analysis_path)
+            events = [Event.model_validate(event) for event in analysis["events"]]
+            report = analysis["report"]
+            written = write_outputs(
+                output_directory=output_directory,
+                calendar_filename=settings.calendar.filename,
+                calendar_data=serialize_calendar(
+                    events, settings.application.timezone
+                ),
+                events=events,
+                report=report,
+                json_enabled=settings.reporting.json_enabled,
+                text_report_enabled=settings.reporting.text_report_enabled,
+            )
+            print(
+                f"Results: {report['posts_in_lookback']} posts in lookback, "
+                f"{len(events)} events, {report['duplicates_removed']} "
+                "duplicates removed."
+            )
+            for path in written:
+                print(f"Generated: {path}")
+        if report["source_errors"] or report["post_errors"]:
+            return 1
+        return 0
+    finally:
+        if mongo is not None:
+            await mongo.close()
 
 
 def main(

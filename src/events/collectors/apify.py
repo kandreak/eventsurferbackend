@@ -159,6 +159,7 @@ def _normalize_post(
         media_urls=_media_urls(_field(item, "media_urls", field_map)),
         location=location if isinstance(location, str) else None,
         author=author if isinstance(author, str) else None,
+        raw_provider_data=item,
     )
 
 

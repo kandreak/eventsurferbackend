@@ -6,7 +6,17 @@ import pytest
 from pydantic import HttpUrl, TypeAdapter
 
 from events import main
+from events.core.settings import BackendSettings
 from events.models import SocialPost
+
+
+@pytest.fixture(autouse=True)
+def disable_database_connection(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "BackendSettings",
+        lambda: BackendSettings(_env_file=None),
+    )
 
 
 def _http_url(value: str) -> HttpUrl:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date as DateValue
 from datetime import datetime
 from datetime import time as TimeValue
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -64,6 +64,11 @@ class SocialPost(BaseModel):
     media_urls: list[HttpUrl] = Field(default_factory=list)
     location: str | None = None
     author: str | None = None
+    raw_provider_data: dict[str, Any] = Field(
+        default_factory=dict,
+        exclude=True,
+        repr=False,
+    )
 
     @field_validator("published_at")
     @classmethod

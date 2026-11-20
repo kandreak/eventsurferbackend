@@ -14,6 +14,8 @@ logic.
 - Async MongoDB Atlas connection configured through environment variables.
 - Startup ping and initial indexes for posts, events, and runs.
 - User settings are stored in MongoDB's `users` collection.
+- Collected posts and their analysis cache are stored in MongoDB's `posts`
+  collection whenever `MONGODB_URI` is configured.
 - Existing collector, extraction, event, and calendar components are retained
   and covered by tests, but are **not yet connected to API-managed runs**.
 
@@ -47,13 +49,9 @@ Work through these steps in order. Keep the API and worker separate, use MongoDB
 as the source of truth, and avoid running Apify or Gemini work inside HTTP
 handlers.
 
-1. **Persist posts and analysis cache**
-   - Add a posts repository using the existing unique
-     `(user_id, platform, external_id)` index.
-   - Store normalized post data, raw provider data, content hashes, analysis
-     status, and extracted events.
-   - Reuse analysis for unchanged posts and re-analyze relevant content changes.
-   - Test cache behavior and isolation between users.
+1. **Persist posts and analysis cache** — implemented for CLI runs configured
+   with MongoDB Atlas. Analysis is reused only when post content and analysis
+   settings match; otherwise the post returns to pending analysis.
 
 2. **Persist and serve events**
    - Add an events repository and a stored event schema with source attribution,
@@ -106,10 +104,12 @@ handlers.
 ## Cost-conscious development
 
 The API and tests can be developed locally with an Atlas free/shared cluster.
-Tests should use mocked Apify/Gemini calls and must not consume provider
-credits. Live Apify or Gemini requests may incur charges; do not run them
-without intentionally choosing to do so. No Google Cloud deployment is needed
-for local development.
+Tests use isolated in-memory database doubles and do not require MongoDB Atlas
+or call Apify/Gemini. For real CLI runs, set `MONGODB_URI` to the Atlas
+connection string; post persistence and analysis caching then use that
+configured database. Live Apify or Gemini requests may incur charges; do not
+run them without intentionally choosing to do so. No Google Cloud deployment is
+needed for local development.
 
 `user_id` is currently an application-level identifier, not authentication.
 Do not expose this development API as a public multi-user service until an
