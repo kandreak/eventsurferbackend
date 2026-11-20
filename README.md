@@ -55,9 +55,14 @@ and events to Atlas when `MONGODB_URI` is configured.
 
 ## TODO — build a working backend
 
-Work through these steps in order. Keep the API and worker separate, use MongoDB
-as the source of truth, and avoid running Apify or Gemini work inside HTTP
-handlers.
+Work through these steps in order. Keep the API and run executor separate, use
+MongoDB as the source of truth, and avoid running Apify or Gemini work inside
+HTTP handlers.
+
+A **run executor** (often called a “worker”) is the backend component that
+claims a queued run and performs its collection, analysis, and publishing
+stages. This component does not exist yet. Today, the CLI pipeline in
+[`src/events/main.py`](./src/events/main.py) runs those stages directly.
 
 1. **Persist posts and analysis cache** — implemented for CLI runs configured
    with MongoDB Atlas. Analysis is reused only when post content and analysis
@@ -72,24 +77,57 @@ handlers.
    - Add a runs repository and `POST`/`GET` run endpoints.
    - Persist run status, current stage, progress, checkpoints, timestamps, and
      errors.
-   - Add atomic worker leasing/locking and idempotent stage transitions.
+   - Add a run executor that performs queued work separately from API request
+     handling. It can reuse the existing CLI pipeline; this does not prescribe
+     a thread model or deployment arrangement.
+   - Keep run limits in shared application settings (for example,
+     `config/settings.json`), not hard-coded:
+     ```json
+     {
+       "run_execution": {
+         "max_concurrent_runs": 5,
+         "max_concurrent_runs_per_user": 1,
+         "max_outstanding_runs_per_user": 1
+       }
+     }
+     ```
+     `max_concurrent_runs` limits runs executing globally;
+     `max_concurrent_runs_per_user` limits runs executing for one user; and
+     `max_outstanding_runs_per_user` limits that user's queued plus running
+     runs. Validate positive values and ensure the per-user running limit does
+     not exceed the global running limit.
+   - Keep the active execution limits separate from the per-user outstanding
+     limit. With the current values, a user can have one outstanding run. If
+     `max_outstanding_runs_per_user` is later raised to `3`, allow up to three
+     of that user's runs to be queued or running; reject the next request with
+     `409 Conflict`. Still execute at most one run for that user at a time.
+   - Enforce the global running limit across all run executors using
+     Atlas-backed atomic leases/slots, not only an in-process semaphore.
+     Queued runs do not consume a global running slot. Enforce the per-user
+     outstanding limit atomically when creating a run, and the per-user
+     execution limit when an executor claims queued work.
+   - Give each lease an owner token, heartbeat, and expiry. Require the current
+     token for progress/checkpoint updates so an expired worker cannot update a
+     run after another worker has claimed it. Make stage writes repeatable and
+     stage transitions conditional on the expected current stage.
    - Implement resume for failed or interrupted runs.
 
-4. **Build the worker pipeline**
-   - Add a worker entrypoint that accepts a `run_id` and loads all state and
+4. **Build the run-execution pipeline**
+   - Add an executor entrypoint that accepts a `run_id` and loads all state and
      settings from MongoDB.
    - Connect the existing collectors and Gemini extraction to independently
      restartable stages.
    - Persist results and checkpoints as stages complete; keep provider errors
      visible in run status and reports.
-   - Support local worker execution first. Do not trigger provider calls in
+   - Support local run execution first. Do not trigger provider calls in
      tests; mocked tests must remain the default.
 
 5. **Connect API runs to background execution**
    - Make run-creation and resume requests schedule work rather than execute
-     long-running tasks in request handlers.
-   - Use a local development runner initially. Add Cloud Run Jobs integration
-     only when deployment is wanted.
+     long-running tasks in request handlers; runs beyond the configured active
+     capacity remain queued.
+   - Use a local development run executor initially. Add Cloud Run Jobs
+     integration only when deployment is wanted.
 
 6. **Finish API behavior and harden**
    - Implement run history, run detail, and resume routes.
