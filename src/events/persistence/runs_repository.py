@@ -276,18 +276,26 @@ class RunsRepository:
             },
         )
 
-    async def claim_next_run(self, worker_id: str) -> RunLease | None:
+    async def claim_next_run(
+        self,
+        worker_id: str,
+        *,
+        run_id: str | None = None,
+    ) -> RunLease | None:
         now = datetime.now(UTC)
+        candidate_query: dict[str, Any] = {
+            "$or": [
+                {"status": "queued"},
+                {
+                    "status": "running",
+                    "lease_expires_at": {"$lte": now},
+                },
+            ]
+        }
+        if run_id is not None:
+            candidate_query["run_id"] = run_id
         candidates = await self._collection.find(
-            {
-                "$or": [
-                    {"status": "queued"},
-                    {
-                        "status": "running",
-                        "lease_expires_at": {"$lte": now},
-                    },
-                ]
-            },
+            candidate_query,
             {"_id": 0},
         ).sort("created_at", ASCENDING).to_list(length=None)
 
@@ -313,7 +321,6 @@ class RunsRepository:
                     break
             if global_slot_id is None:
                 return None
-
             user_slot_id = None
             for slot in range(self._settings.max_concurrent_runs_per_user):
                 slot_id = f"user:{user_id}:{slot}"
@@ -362,6 +369,27 @@ class RunsRepository:
             await self._release_slot(global_slot_id, lease_token)
             await self._release_slot(user_slot_id, lease_token)
         return None
+
+    async def update_report(
+        self,
+        run_id: str,
+        lease_token: str,
+        report: dict[str, Any],
+    ) -> StoredRun:
+        now = datetime.now(UTC)
+        result = await self._collection.find_one_and_update(
+            {
+                "run_id": run_id,
+                "status": "running",
+                "lease_token": lease_token,
+                "lease_expires_at": {"$gt": now},
+            },
+            {"$set": {"report": report, "updated_at": now}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if result is None:
+            raise RunLeaseLost(f"Run {run_id} is no longer owned.")
+        return self._to_model(result)
 
     async def heartbeat(self, run_id: str, lease_token: str) -> bool:
         now = datetime.now(UTC)

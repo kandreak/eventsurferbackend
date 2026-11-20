@@ -21,16 +21,18 @@ logic.
     `GET /api/users/{user_id}/runs/{run_id}` inspect runs
   - `POST /api/users/{user_id}/runs/{run_id}/resume` requeues a failed run
 - Async MongoDB Atlas connection configured through environment variables.
-- Startup ping and initial indexes for posts, events, and runs.
+- Startup ping and initial indexes for posts, events, runs, and run-scoped
+  collected posts.
 - User settings are stored in MongoDB's `users` collection.
 - Collected posts and their analysis cache are stored in MongoDB's `posts`
   collection whenever `MONGODB_URI` is configured.
 - Deduplicated events are stored in MongoDB's `events` collection and served
   with optional date, source, and status filters.
 - Run records, per-user outstanding limits, cross-process execution slots,
-  leases, stage checkpoints, and resume state are stored in MongoDB. The run
-  executor that performs collection and analysis is not implemented yet, so
-  newly queued runs remain queued.
+  leases, stage checkpoints, and resume state are stored in MongoDB. Run
+  execution is available through the `events-worker` command; the API does not
+  launch it automatically yet, so newly queued runs remain queued until an
+  executor is started.
 
 ## Run locally
 
@@ -57,8 +59,10 @@ Event routes accept `date_from`, `date_to`, `source` (exact source name), and
 `status` (`active`, `cancelled`, or `archived`) filters. Without a date filter,
 JSON includes undated events and ICS preserves them as calendar tasks.
 
-The API can queue and manage runs but does not execute them yet. The CLI
-persists posts and events to Atlas when `MONGODB_URI` is configured.
+The API can queue and manage runs but does not start execution automatically.
+The run executor can be invoked separately with `events-worker <run_id>`; see
+step 4 below. The CLI persists posts and events to Atlas when `MONGODB_URI` is
+configured.
 
 ## TODO — build a working backend
 
@@ -68,8 +72,9 @@ HTTP handlers.
 
 A **run executor** (often called a “worker”) is the backend component that
 claims a queued run and performs its collection, analysis, and publishing
-stages. This component does not exist yet. Today, the CLI pipeline in
-[`src/events/main.py`](./src/events/main.py) runs those stages directly.
+stages. The `events-worker` command runs it for a specific run ID. The API does
+not start it automatically yet. The CLI pipeline in
+[`src/events/main.py`](./src/events/main.py) remains available for direct runs.
 
 1. **Persist posts and analysis cache** — implemented for CLI runs configured
    with MongoDB Atlas. Analysis is reused only when post content and analysis
@@ -119,22 +124,28 @@ stages. This component does not exist yet. Today, the CLI pipeline in
      `lease_duration_seconds` is the time allowed between heartbeats, not a
      maximum run duration. If an executor stops renewing its lease, it expires
      and another executor can reclaim the interrupted run. The configured
-     duration is currently 60 seconds; automatic heartbeats will be active once
-     the executor is implemented.
+     duration is currently 60 seconds; the worker renews its lease while
+     processing a run.
    - Failed runs can be resumed from their last incomplete stage; expired
      leases make interrupted runs claimable again.
-   - Runs can be queued and claimed, but no executor process performs their
-     collection or analysis yet; that is the work in steps 4 and 5.
+   - At this step, runs could be queued and claimed but had no executor;
+     execution is added in step 4, with API scheduling in step 5.
 
-4. **Build the run-execution pipeline**
-   - Add an executor entrypoint that accepts a `run_id` and loads all state and
-     settings from MongoDB.
-   - Connect the existing collectors and Gemini extraction to independently
-     restartable stages.
-   - Persist results and checkpoints as stages complete; keep provider errors
-     visible in run status and reports.
-   - Support local run execution first. Do not trigger provider calls in
-     tests; mocked tests must remain the default.
+4. **Build the run-execution pipeline — implemented**
+   - Install the project and run `events-worker <run_id>` to execute one
+     queued run. It loads the user's settings snapshot and run state from
+     MongoDB; shared application settings come from `config/settings.json`,
+     and provider credentials come from the environment.
+   - Collection, analysis, and publication run as separate, checkpointed
+     stages. Collected posts and extracted events are stored per run so a
+     resumed run can continue without repeating completed stages. Post
+     analysis reuses the existing Atlas cache.
+   - The worker renews its execution lease while stages run. Provider errors
+     are saved in the run report and failure history; publication outputs are
+     written under `output/<user_id>/runs/<run_id>/`.
+   - The API does not launch the executor automatically yet; that integration
+     is step 5.
+   - Support local run execution first. Tests mock provider calls by default.
 
 5. **Connect API runs to background execution**
    - Make run-creation and resume requests schedule work rather than execute

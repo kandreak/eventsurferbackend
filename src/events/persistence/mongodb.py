@@ -40,6 +40,19 @@ class MongoDatabase:
             unique=True,
             name="run_id_unique",
         )
+        await self.database["run_posts"].create_index(
+            [
+                ("run_id", ASCENDING),
+                ("platform", ASCENDING),
+                ("external_id", ASCENDING),
+            ],
+            unique=True,
+            name="run_post_identity",
+        )
+        await self.database["run_posts"].create_index(
+            [("run_id", ASCENDING), ("post_order", ASCENDING)],
+            name="run_post_order",
+        )
 
     async def close(self) -> None:
         await self.client.close()

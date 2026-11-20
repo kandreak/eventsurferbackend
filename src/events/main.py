@@ -232,7 +232,7 @@ async def _analyze_posts(
     report: dict[str, Any],
     settings: SettingsConfig,
     secrets: Secrets,
-    cache_path: Path,
+    cache_path: Path | None,
     *,
     posts_repository: PostsRepository | None = None,
     user_id: str | None = None,
@@ -243,6 +243,8 @@ async def _analyze_posts(
         raise ValueError("A user_id is required when persisting posts.")
     cache = {"version": _CACHE_VERSION, "entries": {}}
     if posts_repository is None:
+        if cache_path is None:
+            raise ValueError("A cache path is required without a posts repository.")
         cache = (
             _read_json(cache_path)
             if cache_path.exists()
@@ -412,6 +414,8 @@ async def _analyze_posts(
             await extractor.close()
 
     if posts_repository is None:
+        if cache_path is None:
+            raise ValueError("A cache path is required without a posts repository.")
         _write_json(cache_path, cache)
     events = [
         event

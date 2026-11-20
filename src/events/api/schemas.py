@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -95,6 +95,7 @@ class StoredRun(BaseModel):
     status: RunStatus
     current_stage: RunStage
     progress: RunProgress
+    report: dict[str, Any] | None = None
     checkpoints: dict[RunStage, datetime] = Field(default_factory=dict)
     settings_snapshot: UserSettings
     attempt: int = Field(ge=0)
