@@ -219,8 +219,8 @@ separate command or process.
      ```
    - Each test creates and drops its own randomly named temporary database;
      no existing application records are touched. The Atlas database user
-     needs permission to create and drop databases. Tests never call
-     Apify/Gemini.
+     needs permission to create and drop databases. These Atlas tests never
+     call Apify/Gemini.
 
 9. **Add authentication and authorization**
    - Choose an identity provider and map verified identities to application
@@ -247,11 +247,62 @@ separate command or process.
 ## Cost-conscious development
 
 The API and tests can be developed locally with an Atlas free/shared cluster.
-Tests use isolated in-memory database doubles and do not require MongoDB Atlas
-or call Apify/Gemini. For real API runs, set `MONGODB_URI` to the Atlas
-connection string and configure provider credentials in the environment. Live
-Apify or Gemini requests may incur charges; do not start a run unless you intend
-to make those calls. No Google Cloud deployment is needed for local development.
+The default test suite uses isolated in-memory database doubles and does not
+require MongoDB Atlas or call Apify/Gemini. Atlas tests are described in step 8.
+For real API runs, set `MONGODB_URI` to the Atlas connection string and
+configure provider credentials in the environment. Live Apify or Gemini
+requests may incur charges; do not start a run unless you intend to make those
+calls. No Google Cloud deployment is needed for local development.
+
+## Opt-in provider integration tests
+
+Provider tests are disabled unless their individual opt-in variables are set.
+They use credentials from `.env` and never read Atlas records. The Gemini
+smoke check reads the configured model metadata without generating content:
+
+```powershell
+$env:RUN_GEMINI_INTEGRATION_TESTS = "1"
+python -m pytest tests/integration/test_gemini_api.py
+Remove-Item Env:RUN_GEMINI_INTEGRATION_TESTS
+```
+
+An actual generation request is separately opt-in. It sends one synthetic
+text-only post, uses no images, and disables retries; Google billing must be
+enabled for the API key:
+
+```powershell
+$env:RUN_GEMINI_INTEGRATION_TESTS = "1"
+$env:RUN_GEMINI_GENERATION_INTEGRATION_TESTS = "1"
+python -m pytest tests/integration/test_gemini_api.py -k synthetic_event
+Remove-Item Env:RUN_GEMINI_INTEGRATION_TESTS
+Remove-Item Env:RUN_GEMINI_GENERATION_INTEGRATION_TESTS
+```
+
+The basic Apify check reads metadata for the configured Instagram actor; it
+does not start an actor run:
+
+```powershell
+$env:RUN_APIFY_INTEGRATION_TESTS = "1"
+python -m pytest tests/integration/test_apify_api.py
+Remove-Item Env:RUN_APIFY_INTEGRATION_TESTS
+```
+
+An actual scrape is separately opt-in, requires a public profile URL chosen
+for the test (replace the example URL below with one you can access), requests
+at most one post, and caps the actor charge at `$0.05`:
+
+```powershell
+$env:RUN_APIFY_INTEGRATION_TESTS = "1"
+$env:RUN_APIFY_SCRAPE_INTEGRATION_TESTS = "1"
+$env:APIFY_INTEGRATION_SOURCE_URL = "https://www.instagram.com/example/"
+python -m pytest tests/integration/test_apify_api.py -k scraper
+Remove-Item Env:RUN_APIFY_INTEGRATION_TESTS
+Remove-Item Env:RUN_APIFY_SCRAPE_INTEGRATION_TESTS
+Remove-Item Env:APIFY_INTEGRATION_SOURCE_URL
+```
+
+The Apify scraper's charge cap is enforced by Apify; provider pricing and
+other account limits still apply.
 
 `user_id` is currently an application-level identifier, not authentication.
 Do not expose this development API as a public multi-user service until an
