@@ -181,11 +181,18 @@ separate command or process.
      leases enforce the global and per-user limits across API processes.
    - Cloud Run Jobs integration can be added later if deployment requires it.
 
-6. **Standardize API validation and errors**
-   - Use consistent response shapes and status codes for invalid input,
-     missing resources, conflicts, and unavailable services.
-   - Make malformed persisted data and unexpected repository failures visible
-     without returning success-shaped fallbacks.
+6. **Standardize API validation and errors — implemented**
+   - Errors use `{"error":{"code":"...","message":"...","details":[...]}}`;
+     `details` is included for request validation errors and contains only
+     field locations, safe messages, and validation types.
+   - Expected HTTP failures preserve their status codes; invalid requests use
+     `422`, missing resources use `404`, state conflicts use `409`, and
+     unavailable MongoDB services use `503`.
+   - Invalid persisted Pydantic data and unexpected exceptions are logged and
+     return sanitized `500` responses. MongoDB exceptions are logged and
+     reported as `503`; exception details are not sent to clients.
+   - Calendar export returns `404` when user settings are missing instead of
+     silently assuming a timezone.
 
 7. **Verify user scoping**
    - Audit every repository operation that reads or writes user-owned data.

@@ -6,8 +6,19 @@ import socket
 from uuid import uuid4
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from pymongo import AsyncMongoClient
+from pymongo.errors import PyMongoError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from events.api.errors import (
+    database_error_handler,
+    http_exception_handler,
+    persisted_validation_handler,
+    request_validation_handler,
+    unexpected_error_handler,
+)
 from events.api.routes.events import router as events_router
 from events.api.routes.runs import router as runs_router
 from events.api.routes.settings import router as settings_router
@@ -84,6 +95,11 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, request_validation_handler)
+app.add_exception_handler(ValidationError, persisted_validation_handler)
+app.add_exception_handler(PyMongoError, database_error_handler)
+app.add_exception_handler(Exception, unexpected_error_handler)
 app.include_router(settings_router)
 app.include_router(events_router)
 app.include_router(runs_router)

@@ -7,11 +7,16 @@ from events.api.dependencies import (
     EventsRepositoryDependency,
     UsersRepositoryDependency,
 )
+from events.api.errors import API_ERROR_RESPONSES
 from events.api.schemas import StoredEvent, UserId
 from events.calendar_export import serialize_calendar
 from events.models import EventStatus
 
-router = APIRouter(prefix="/api/users", tags=["events"])
+router = APIRouter(
+    prefix="/api/users",
+    tags=["events"],
+    responses=API_ERROR_RESPONSES,
+)
 
 
 async def _list_events(
@@ -100,9 +105,13 @@ async def export_user_events_ics(
         event_status=event_status,
     )
     settings = await users_repository.get_settings(user_id)
-    timezone = settings.timezone if settings is not None else "Europe/Rome"
+    if settings is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User settings were not found.",
+        )
     return Response(
-        content=serialize_calendar(events, timezone),
+        content=serialize_calendar(events, settings.timezone),
         media_type="text/calendar",
         headers={"Content-Disposition": 'attachment; filename="events.ics"'},
     )

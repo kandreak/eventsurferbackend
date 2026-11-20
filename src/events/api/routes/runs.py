@@ -8,6 +8,7 @@ from events.api.dependencies import (
     RunsRepositoryDependency,
     UsersRepositoryDependency,
 )
+from events.api.errors import API_ERROR_RESPONSES
 from events.api.schemas import StoredRun, UserId
 from events.calendar_export import serialize_calendar
 from events.models import Event
@@ -16,7 +17,11 @@ from events.persistence.runs_repository import (
     RunStateConflict,
 )
 
-router = APIRouter(prefix="/api/users", tags=["runs"])
+router = APIRouter(
+    prefix="/api/users",
+    tags=["runs"],
+    responses=API_ERROR_RESPONSES,
+)
 
 
 @router.post(

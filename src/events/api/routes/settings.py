@@ -3,9 +3,14 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Path, status
 
 from events.api.dependencies import UsersRepositoryDependency
+from events.api.errors import API_ERROR_RESPONSES
 from events.api.schemas import UserId, UserSettings
 
-router = APIRouter(prefix="/api/users", tags=["user settings"])
+router = APIRouter(
+    prefix="/api/users",
+    tags=["user settings"],
+    responses=API_ERROR_RESPONSES,
+)
 
 
 @router.get("/{user_id}/settings", response_model=UserSettings)

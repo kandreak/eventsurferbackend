@@ -93,6 +93,12 @@ def test_database_routes_return_503_when_mongodb_is_not_configured(monkeypatch):
 
     assert health.status_code == 200
     assert settings.status_code == 503
+    assert settings.json() == {
+        "error": {
+            "code": "service_unavailable",
+            "message": "Database is not configured.",
+        }
+    }
 
 
 def test_blank_mongodb_uri_is_treated_as_unconfigured():

@@ -49,6 +49,22 @@ class UserSettings(BaseModel):
         return self
 
 
+class APIValidationIssue(BaseModel):
+    location: list[str | int]
+    message: str
+    type: str
+
+
+class APIError(BaseModel):
+    code: str
+    message: str
+    details: list[APIValidationIssue] | None = None
+
+
+class APIErrorResponse(BaseModel):
+    error: APIError
+
+
 class StoredEvent(Event):
     event_id: str = Field(min_length=1)
     status: EventStatus = "active"
