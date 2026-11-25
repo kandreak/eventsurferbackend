@@ -275,6 +275,74 @@ class RunsRepository:
         async with self._client.start_session() as session:
             return await session.with_transaction(transaction)
 
+    async def stop_run(
+        self,
+        user_id: str,
+        run_id: str,
+    ) -> StoredRun | None:
+        now = datetime.now(UTC)
+
+        async def transaction(session: Any) -> StoredRun | None:
+            current = await self._collection.find_one(
+                {"user_id": user_id, "run_id": run_id},
+                session=session,
+            )
+            if current is None:
+                return None
+            if current["status"] == "queued":
+                stopped = await self._collection.find_one_and_update(
+                    {
+                        "user_id": user_id,
+                        "run_id": run_id,
+                        "status": "queued",
+                    },
+                    {
+                        "$set": {
+                            "status": "stopped",
+                            "finished_at": now,
+                            "updated_at": now,
+                        }
+                    },
+                    return_document=ReturnDocument.AFTER,
+                    session=session,
+                )
+                if stopped is None:
+                    return None
+                await self._decrement_outstanding(user_id, session=session)
+                await self._run_posts.delete_many(
+                    {"run_id": run_id, "user_id": user_id},
+                    session=session,
+                )
+                return self._to_model(stopped)
+            if current["status"] == "running":
+                if current.get("cancellation_requested", False):
+                    return self._to_model(current)
+                stopping = await self._collection.find_one_and_update(
+                    {
+                        "user_id": user_id,
+                        "run_id": run_id,
+                        "status": "running",
+                        "cancellation_requested": {"$ne": True},
+                    },
+                    {
+                        "$set": {
+                            "cancellation_requested": True,
+                            "updated_at": now,
+                        }
+                    },
+                    return_document=ReturnDocument.AFTER,
+                    session=session,
+                )
+                return (
+                    self._to_model(stopping)
+                    if stopping is not None
+                    else None
+                )
+            return self._to_model(current)
+
+        async with self._client.start_session() as session:
+            return await session.with_transaction(transaction)
+
     async def finish_stopped(
         self,
         run_id: str,

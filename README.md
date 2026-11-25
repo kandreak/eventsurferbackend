@@ -19,6 +19,7 @@ logic.
   - `POST /api/users/{user_id}/runs` queues and schedules a run
   - `POST /api/users/{user_id}/runs/stop` stops queued runs and requests a
     cooperative stop of the user's running runs
+  - `POST /api/users/{user_id}/runs/{run_id}/stop` stops only that run
   - `GET /api/users/{user_id}/runs` and
     `GET /api/users/{user_id}/runs/{run_id}` inspect runs
   - `POST /api/users/{user_id}/runs/{run_id}/resume` requeues a failed run

@@ -93,6 +93,17 @@ class InMemoryRunsRepository:
                 cancellation_requested += 1
         return stopped, cancellation_requested
 
+    async def stop_run(self, user_id: str, run_id: str) -> StoredRun | None:
+        run = await self.get_run(user_id, run_id)
+        if run is None:
+            return None
+        if run.status == "queued":
+            run.status = "stopped"
+            run.finished_at = datetime.now(UTC)
+        elif run.status == "running":
+            run.cancellation_requested = True
+        return run
+
     async def get_run(self, user_id: str, run_id: str) -> StoredRun | None:
         return next(
             (
@@ -332,6 +343,34 @@ def test_stopping_user_runs_stops_queued_and_requests_running_cancellation():
     assert runs_repository.runs[0].status == "stopped"
     assert runs_repository.runs[1].status == "running"
     assert runs_repository.runs[1].cancellation_requested
+    assert bob_after_stop.json()["status"] == "queued"
+
+
+def test_stopping_single_run_is_scoped_to_the_requested_user_and_run():
+    runs_repository = InMemoryRunsRepository()
+    app.dependency_overrides[get_runs_repository] = lambda: runs_repository
+    app.dependency_overrides[get_users_repository] = (
+        lambda: InMemoryUsersRepository()
+    )
+    try:
+        with TestClient(app) as client:
+            alice_run = client.post("/api/users/alice/runs").json()
+            bob_run = client.post("/api/users/bob/runs").json()
+            stopped = client.post(
+                f"/api/users/alice/runs/{alice_run['run_id']}/stop"
+            )
+            wrong_user = client.post(
+                f"/api/users/alice/runs/{bob_run['run_id']}/stop"
+            )
+            bob_after_stop = client.get(
+                f"/api/users/bob/runs/{bob_run['run_id']}"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert stopped.status_code == 202
+    assert stopped.json()["status"] == "stopped"
+    assert wrong_user.status_code == 404
     assert bob_after_stop.json()["status"] == "queued"
 
 

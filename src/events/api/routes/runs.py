@@ -82,6 +82,25 @@ async def stop_user_runs(
     )
 
 
+@router.post(
+    "/{user_id}/runs/{run_id}/stop",
+    response_model=StoredRun,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def stop_user_run(
+    user_id: Annotated[UserId, Path()],
+    run_id: Annotated[str, Path(min_length=1)],
+    repository: RunsRepositoryDependency,
+) -> StoredRun:
+    run = await repository.stop_run(user_id, run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run was not found.",
+        )
+    return run
+
+
 @router.get("/{user_id}/runs", response_model=list[StoredRun])
 async def list_user_runs(
     user_id: Annotated[UserId, Path()],

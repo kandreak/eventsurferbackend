@@ -258,6 +258,60 @@ async def test_stopping_runs_clears_run_posts_and_preserves_other_users(
 
 
 @pytest.mark.asyncio
+async def test_stopping_one_run_does_not_stop_others_or_delete_their_posts(
+    atlas_database,
+):
+    user_id, other_user_id = _user_id(), _user_id()
+    repository = RunsRepository(
+        atlas_database["runs"],
+        _run_settings(max_outstanding_runs_per_user=3),
+        _user_limits(),
+    )
+    target = await repository.create_run(user_id, UserSettings())
+    lease = await repository.claim_next_run("atlas-stop-one-worker")
+    assert lease is not None
+    same_user_queued = await repository.create_run(user_id, UserSettings())
+    other_user_queued = await repository.create_run(
+        other_user_id,
+        UserSettings(),
+    )
+    await atlas_database["run_posts"].insert_many(
+        [
+            {
+                "run_id": run.run_id,
+                "user_id": owner_id,
+                "platform": "instagram",
+                "external_id": "post-1",
+                "post_order": 0,
+                "post": {},
+                "events": [],
+            }
+            for run, owner_id in (
+                (target, user_id),
+                (same_user_queued, user_id),
+                (other_user_queued, other_user_id),
+            )
+        ]
+    )
+
+    requested = await repository.stop_run(user_id, target.run_id)
+    remaining = await repository.stop_run(user_id, "missing-run")
+    finished = await repository.finish_stopped(target.run_id, lease.token)
+    remaining_run_ids = await atlas_database["run_posts"].distinct("run_id")
+
+    assert requested is not None
+    assert requested.status == "running"
+    assert requested.cancellation_requested
+    assert remaining is None
+    assert finished is not None
+    assert finished.status == "stopped"
+    assert set(remaining_run_ids) == {
+        same_user_queued.run_id,
+        other_user_queued.run_id,
+    }
+
+
+@pytest.mark.asyncio
 async def test_heartbeat_renews_lease_and_expired_lease_can_be_reclaimed(
     atlas_database,
 ):
