@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+import logging
 import os
 from pathlib import Path
 import socket
@@ -32,6 +33,8 @@ from events.persistence.posts_repository import PostsRepository
 from events.persistence.run_posts_repository import RunPostsRepository
 from events.persistence.runs_repository import RunsRepository
 from events.secrets import Secrets
+
+logging.basicConfig(level=logging.INFO)
 
 
 @asynccontextmanager
