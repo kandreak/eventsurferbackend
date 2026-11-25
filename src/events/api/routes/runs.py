@@ -9,7 +9,7 @@ from events.api.dependencies import (
     UsersRepositoryDependency,
 )
 from events.api.errors import API_ERROR_RESPONSES
-from events.api.schemas import StoredRun, UserId
+from events.api.schemas import StoredRun, StopUserRunsResponse, UserId
 from events.calendar_export import serialize_calendar
 from events.models import Event
 from events.persistence.runs_repository import (
@@ -62,6 +62,24 @@ async def create_user_run(
     if dispatcher is not None:
         dispatcher.notify()
     return run
+
+
+@router.post(
+    "/{user_id}/runs/stop",
+    response_model=StopUserRunsResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def stop_user_runs(
+    user_id: Annotated[UserId, Path()],
+    repository: RunsRepositoryDependency,
+) -> StopUserRunsResponse:
+    stopped, cancellation_requested = await repository.stop_user_runs(
+        user_id
+    )
+    return StopUserRunsResponse(
+        stopped=stopped,
+        cancellation_requested=cancellation_requested,
+    )
 
 
 @router.get("/{user_id}/runs", response_model=list[StoredRun])

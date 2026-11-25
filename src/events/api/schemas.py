@@ -21,7 +21,13 @@ UserId = Annotated[
     ),
 ]
 RunStage = Literal["collect", "analyze", "publish"]
-RunStatus = Literal["queued", "running", "succeeded", "failed"]
+RunStatus = Literal[
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "stopped",
+]
 
 
 class UserSettings(BaseModel):
@@ -109,6 +115,7 @@ class StoredRun(BaseModel):
     run_id: str = Field(min_length=1)
     user_id: UserId
     status: RunStatus
+    cancellation_requested: bool = False
     current_stage: RunStage
     progress: RunProgress
     report: dict[str, Any] | None = None
@@ -151,3 +158,8 @@ class StoredRun(BaseModel):
             )
             for stage, timestamp in value.items()
         }
+
+
+class StopUserRunsResponse(BaseModel):
+    stopped: int = Field(ge=0)
+    cancellation_requested: int = Field(ge=0)

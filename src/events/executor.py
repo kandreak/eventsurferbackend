@@ -55,6 +55,12 @@ class RunExecutor:
                 self._execute_stages(lease),
             )
         except RunLeaseLost:
+            stopped = await self._runs.finish_stopped(
+                run_id,
+                lease.token,
+            )
+            if stopped is not None:
+                return False
             raise
         except Exception as exc:
             logger.exception(
@@ -62,6 +68,12 @@ class RunExecutor:
                 run_id,
                 lease.run.current_stage,
             )
+            stopped = await self._runs.finish_stopped(
+                run_id,
+                lease.token,
+            )
+            if stopped is not None:
+                return False
             await self._runs.fail_run(
                 run_id,
                 lease.token,

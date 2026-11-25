@@ -62,6 +62,9 @@ class RunsRepository:
         self._counters: AsyncCollection[dict[str, Any]] = self._database[
             "run_user_counters"
         ]
+        self._run_posts: AsyncCollection[dict[str, Any]] = self._database[
+            "run_posts"
+        ]
         self._slots: AsyncCollection[dict[str, Any]] = self._database[
             "run_execution_slots"
         ]
@@ -157,6 +160,7 @@ class RunsRepository:
             "checkpoints": {},
             "settings_snapshot": settings_snapshot.model_dump(mode="json"),
             "attempt": 0,
+            "cancellation_requested": False,
             "error": None,
             "errors": [],
             "created_at": now,
@@ -202,6 +206,156 @@ class RunsRepository:
             self._to_model(document)
             for document in await cursor.to_list(length=limit)
         ]
+
+    async def stop_user_runs(self, user_id: str) -> tuple[int, int]:
+        now = datetime.now(UTC)
+
+        async def transaction(session: Any) -> tuple[int, int]:
+            stopped = 0
+            cancellation_requested = 0
+            active_runs = await self._collection.find(
+                {
+                    "user_id": user_id,
+                    "status": {"$in": ["queued", "running"]},
+                },
+                session=session,
+            ).to_list(length=None)
+            for run in active_runs:
+                if run["status"] == "queued":
+                    result = await self._collection.update_one(
+                        {
+                            "user_id": user_id,
+                            "run_id": run["run_id"],
+                            "status": "queued",
+                        },
+                        {
+                            "$set": {
+                                "status": "stopped",
+                                "finished_at": now,
+                                "updated_at": now,
+                            }
+                        },
+                        session=session,
+                    )
+                    if result.modified_count:
+                        await self._decrement_outstanding(
+                            user_id,
+                            session=session,
+                        )
+                        await self._run_posts.delete_many(
+                            {
+                                "run_id": run["run_id"],
+                                "user_id": user_id,
+                            },
+                            session=session,
+                        )
+                        stopped += 1
+                else:
+                    if not run.get("cancellation_requested", False):
+                        await self._collection.update_one(
+                            {
+                                "user_id": user_id,
+                                "run_id": run["run_id"],
+                                "status": "running",
+                                "cancellation_requested": {
+                                    "$ne": True,
+                                },
+                            },
+                            {
+                                "$set": {
+                                    "cancellation_requested": True,
+                                    "updated_at": now,
+                                }
+                            },
+                            session=session,
+                        )
+                    cancellation_requested += 1
+            return stopped, cancellation_requested
+
+        async with self._client.start_session() as session:
+            return await session.with_transaction(transaction)
+
+    async def finish_stopped(
+        self,
+        run_id: str,
+        lease_token: str,
+    ) -> StoredRun | None:
+        async def transaction(
+            session: Any,
+        ) -> tuple[dict[str, Any] | None, str | None, str | None]:
+            current = await self._collection.find_one(
+                {"run_id": run_id},
+                session=session,
+            )
+            if current is None:
+                return None, None, None
+            if (
+                current["status"] == "stopped"
+                and current.get("last_lease_token") == lease_token
+            ):
+                return (
+                    current,
+                    current.get("global_slot_id"),
+                    current.get("user_slot_id"),
+                )
+            if (
+                current["status"] != "running"
+                or not current.get("cancellation_requested", False)
+                or current.get("lease_token") != lease_token
+            ):
+                return None, None, None
+            now = datetime.now(UTC)
+            result = await self._collection.find_one_and_update(
+                {
+                    "run_id": run_id,
+                    "status": "running",
+                    "cancellation_requested": True,
+                    "lease_token": lease_token,
+                },
+                {
+                    "$set": {
+                        "status": "stopped",
+                        "finished_at": now,
+                        "updated_at": now,
+                        "last_lease_token": lease_token,
+                    },
+                    "$unset": {
+                        "lease_token": "",
+                        "lease_expires_at": "",
+                        "worker_id": "",
+                        "global_slot_id": "",
+                        "user_slot_id": "",
+                    },
+                },
+                return_document=ReturnDocument.AFTER,
+                session=session,
+            )
+            if result is None:
+                return None, None, None
+            await self._decrement_outstanding(
+                result["user_id"],
+                session=session,
+            )
+            await self._run_posts.delete_many(
+                {
+                    "run_id": run_id,
+                    "user_id": result["user_id"],
+                },
+                session=session,
+            )
+            return (
+                result,
+                current.get("global_slot_id"),
+                current.get("user_slot_id"),
+            )
+
+        async with self._client.start_session() as session:
+            completed, global_slot_id, user_slot_id = (
+                await session.with_transaction(transaction)
+            )
+        await self._release_slot(global_slot_id, lease_token)
+        await self._release_slot(user_slot_id, lease_token)
+        return self._to_model(completed) if completed is not None else None
 
     async def resume_run(self, user_id: str, run_id: str) -> StoredRun | None:
         async def transaction(session: Any) -> StoredRun | None:
@@ -309,12 +463,26 @@ class RunsRepository:
 
     async def claim_next_run(self, worker_id: str) -> RunLease | None:
         now = datetime.now(UTC)
+        expired_cancellations = await self._collection.find(
+            {
+                "status": "running",
+                "cancellation_requested": True,
+                "lease_expires_at": {"$lte": now},
+            },
+            {"run_id": 1, "lease_token": 1},
+        ).to_list(length=None)
+        for run in expired_cancellations:
+            lease_token = run.get("lease_token")
+            if lease_token is not None:
+                await self.finish_stopped(run["run_id"], lease_token)
+
         candidate_query = {
             "$or": [
                 {"status": "queued"},
                 {
                     "status": "running",
                     "lease_expires_at": {"$lte": now},
+                    "cancellation_requested": {"$ne": True},
                 },
             ]
         }
@@ -406,6 +574,7 @@ class RunsRepository:
                 "run_id": run_id,
                 "status": "running",
                 "lease_token": lease_token,
+                "cancellation_requested": {"$ne": True},
                 "lease_expires_at": {"$gt": now},
             },
             {"$set": {"report": report, "updated_at": now}},
@@ -427,6 +596,7 @@ class RunsRepository:
                     "run_id": run_id,
                     "status": "running",
                     "lease_token": lease_token,
+                    "cancellation_requested": {"$ne": True},
                     "lease_expires_at": {"$gt": now},
                 },
                 {"global_slot_id": 1, "user_slot_id": 1},
@@ -490,6 +660,7 @@ class RunsRepository:
                 "status": "running",
                 "current_stage": stage,
                 "lease_token": lease_token,
+                "cancellation_requested": {"$ne": True},
                 "lease_expires_at": {"$gt": datetime.now(UTC)},
             },
             {
@@ -524,6 +695,8 @@ class RunsRepository:
         )
         now = datetime.now(UTC)
         if current is not None:
+            if current.get("cancellation_requested", False):
+                raise RunLeaseLost(f"Run {run_id} cancellation was requested.")
             checkpointed = expected_stage in current.get("checkpoints", {})
             lease_expires_at = current.get("lease_expires_at")
             if (
@@ -563,6 +736,7 @@ class RunsRepository:
                 "status": "running",
                 "current_stage": expected_stage,
                 "lease_token": lease_token,
+                "cancellation_requested": {"$ne": True},
                 "lease_expires_at": {"$gt": now},
             },
             {
@@ -661,6 +835,8 @@ class RunsRepository:
                 raise RunStateConflict(
                     f"Run {run_id} cannot finish from {expected_stage}."
                 )
+            if current.get("cancellation_requested", False):
+                raise RunLeaseLost(f"Run {run_id} cancellation was requested.")
             update: dict[str, Any] = {
                 "$set": {
                     "status": status,
@@ -687,6 +863,7 @@ class RunsRepository:
                     "status": "running",
                     "current_stage": expected_stage,
                     "lease_token": lease_token,
+                    "cancellation_requested": {"$ne": True},
                     "lease_expires_at": {"$gt": finished_at},
                 },
                 update,

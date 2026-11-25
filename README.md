@@ -17,6 +17,8 @@ logic.
   - `GET /api/users/{user_id}/events.ics`
 - Run management and execution API:
   - `POST /api/users/{user_id}/runs` queues and schedules a run
+  - `POST /api/users/{user_id}/runs/stop` stops queued runs and requests a
+    cooperative stop of the user's running runs
   - `GET /api/users/{user_id}/runs` and
     `GET /api/users/{user_id}/runs/{run_id}` inspect runs
   - `POST /api/users/{user_id}/runs/{run_id}/resume` requeues a failed run
@@ -86,8 +88,15 @@ Invoke-RestMethod -Uri "$base/api/users/$userId/runs/$($run.run_id)"
 Poll run detail until it is `succeeded` or `failed`, then retrieve
 `/report`, `/events.json`, or `/events.ics` using that run ID.
 
-Run creation and resume return `202 Accepted`; the FastAPI process dispatches
-the work in the background, so the HTTP request does not wait for providers.
+Run creation, resume, and stop return `202 Accepted`; the FastAPI process
+dispatches the work in the background, so the HTTP request does not wait for
+providers. Queued runs transition to `stopped` immediately. Active runs
+transition to `stopped` cooperatively when their current operation next checks
+its lease; the response reports runs stopped and active runs with a stop
+requested, via the `stopped` and `cancellation_requested` counts. When a run
+becomes `stopped`, its run-scoped collected posts and event snapshots are
+deleted. The shared per-user `posts` analysis cache is retained.
+Already-terminal `succeeded` and `failed` runs are left unchanged.
 Run detail exposes progress and errors. After analysis completes, use the
 run-scoped JSON, ICS, and report routes above to retrieve its output.
 

@@ -78,6 +78,21 @@ class InMemoryRunsRepository:
         items = [run for run in self.runs if run.user_id == user_id]
         return list(reversed(items))[offset : offset + limit]
 
+    async def stop_user_runs(self, user_id: str) -> tuple[int, int]:
+        stopped = 0
+        cancellation_requested = 0
+        for run in self.runs:
+            if run.user_id != user_id:
+                continue
+            if run.status == "queued":
+                run.status = "stopped"
+                run.finished_at = datetime.now(UTC)
+                stopped += 1
+            elif run.status == "running":
+                run.cancellation_requested = True
+                cancellation_requested += 1
+        return stopped, cancellation_requested
+
     async def get_run(self, user_id: str, run_id: str) -> StoredRun | None:
         return next(
             (
@@ -286,6 +301,38 @@ def test_configured_outstanding_limit_allows_queued_runs_up_to_the_limit():
         202,
         409,
     ]
+
+
+def test_stopping_user_runs_stops_queued_and_requests_running_cancellation():
+    runs_repository = InMemoryRunsRepository()
+    runs_repository.max_outstanding_per_user = 3
+    app.dependency_overrides[get_runs_repository] = lambda: runs_repository
+    app.dependency_overrides[get_users_repository] = (
+        lambda: InMemoryUsersRepository()
+    )
+    try:
+        with TestClient(app) as client:
+            for _ in range(2):
+                client.post("/api/users/alice/runs")
+            bob_run = client.post("/api/users/bob/runs").json()
+            runs_repository.runs[1].status = "running"
+
+            response = client.post("/api/users/alice/runs/stop")
+            bob_after_stop = client.get(
+                f"/api/users/bob/runs/{bob_run['run_id']}"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "stopped": 1,
+        "cancellation_requested": 1,
+    }
+    assert runs_repository.runs[0].status == "stopped"
+    assert runs_repository.runs[1].status == "running"
+    assert runs_repository.runs[1].cancellation_requested
+    assert bob_after_stop.json()["status"] == "queued"
 
 
 def test_run_creation_returns_429_when_the_weekly_limit_is_reached():

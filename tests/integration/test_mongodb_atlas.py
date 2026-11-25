@@ -204,6 +204,60 @@ async def test_global_execution_slots_limit_concurrent_claims(atlas_database):
 
 
 @pytest.mark.asyncio
+async def test_stopping_runs_clears_run_posts_and_preserves_other_users(
+    atlas_database,
+):
+    user_id, other_user_id = _user_id(), _user_id()
+    repository = RunsRepository(
+        atlas_database["runs"],
+        _run_settings(max_outstanding_runs_per_user=2),
+        _user_limits(),
+    )
+    running = await repository.create_run(user_id, UserSettings())
+    lease = await repository.claim_next_run("atlas-stop-worker")
+    assert lease is not None
+    queued = await repository.create_run(user_id, UserSettings())
+    other_user_run = await repository.create_run(
+        other_user_id,
+        UserSettings(),
+    )
+    await atlas_database["run_posts"].insert_many(
+        [
+            {
+                "run_id": run_id,
+                "user_id": owner_id,
+                "platform": "instagram",
+                "external_id": "post-1",
+                "post_order": 0,
+                "post": {},
+                "events": [],
+            }
+            for run_id, owner_id in (
+                (running.run_id, user_id),
+                (queued.run_id, user_id),
+                (other_user_run.run_id, other_user_id),
+            )
+        ]
+    )
+
+    stopped, stop_requested = await repository.stop_user_runs(user_id)
+    persisted_running = await repository.get_run(user_id, running.run_id)
+    persisted_queued = await repository.get_run(user_id, queued.run_id)
+    assert persisted_running is not None
+    assert persisted_queued is not None
+    assert persisted_running.cancellation_requested
+    assert persisted_queued.status == "stopped"
+
+    finished = await repository.finish_stopped(running.run_id, lease.token)
+    remaining_run_ids = await atlas_database["run_posts"].distinct("run_id")
+
+    assert (stopped, stop_requested) == (1, 1)
+    assert finished is not None
+    assert finished.status == "stopped"
+    assert remaining_run_ids == [other_user_run.run_id]
+
+
+@pytest.mark.asyncio
 async def test_heartbeat_renews_lease_and_expired_lease_can_be_reclaimed(
     atlas_database,
 ):

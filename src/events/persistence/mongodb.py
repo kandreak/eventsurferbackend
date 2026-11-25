@@ -53,6 +53,21 @@ class MongoDatabase:
             [("run_id", ASCENDING), ("post_order", ASCENDING)],
             name="run_post_order",
         )
+        legacy_cancelled_runs = await self.database["runs"].find(
+            {"status": "cancelled"},
+            {"run_id": 1, "user_id": 1},
+        ).to_list(length=None)
+        for run in legacy_cancelled_runs:
+            await self.database["run_posts"].delete_many(
+                {
+                    "run_id": run["run_id"],
+                    "user_id": run["user_id"],
+                }
+            )
+        await self.database["runs"].update_many(
+            {"status": "cancelled"},
+            {"$set": {"status": "stopped"}},
+        )
 
     async def close(self) -> None:
         await self.client.close()

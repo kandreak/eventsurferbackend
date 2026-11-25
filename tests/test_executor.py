@@ -16,7 +16,7 @@ from events.config import (
 )
 from events.pipeline import _report_template
 from events.models import SocialPost, SourceConfig
-from events.persistence.runs_repository import RunLease
+from events.persistence.runs_repository import RunLease, RunLeaseLost
 
 
 def _settings(*, lease_duration_seconds=60) -> SettingsConfig:
@@ -69,6 +69,19 @@ class InMemoryRunsRepository:
         self.progress = []
         self.failure = None
         self.heartbeat_count = 0
+        self.cancellation_requested = False
+
+    async def finish_stopped(self, run_id, lease_token):
+        if self.cancellation_requested:
+            self.run = self.run.model_copy(
+                update={
+                    "status": "stopped",
+                    "cancellation_requested": True,
+                    "finished_at": datetime.now(UTC),
+                }
+            )
+            return self.run
+        return None
 
     async def claim_next_run(self, worker_id, *, run_id):
         assert run_id == self.run.run_id
@@ -84,11 +97,15 @@ class InMemoryRunsRepository:
         return self.run
 
     async def update_report(self, run_id, lease_token, report):
+        if self.cancellation_requested:
+            raise RunLeaseLost("Cancellation was requested.")
         self.reports.append(report)
         self.run = self.run.model_copy(update={"report": report})
         return self.run
 
     async def advance_stage(self, run_id, lease_token, expected_stage):
+        if self.cancellation_requested:
+            raise RunLeaseLost("Cancellation was requested.")
         next_stage = {
             "collect": "analyze",
             "analyze": "publish",
@@ -245,6 +262,34 @@ async def test_executor_saves_provider_errors_in_report_and_failed_run(
     assert runs.run.report["source_errors"] == ["Apify request failed."]
     assert runs.run.error["message"] == "Collection failed for 1 source(s)."
     assert runs.run.current_stage == "collect"
+
+
+@pytest.mark.asyncio
+async def test_executor_finishes_stopped_work_after_lease_update_is_rejected(
+    monkeypatch,
+):
+    runs = InMemoryRunsRepository()
+    run_posts = InMemoryRunPostsRepository([])
+
+    async def collect(*args, **kwargs):
+        runs.cancellation_requested = True
+        return [], _report_template(1)
+
+    monkeypatch.setattr(executor, "_collect_posts", collect)
+    run_executor = executor.RunExecutor(
+        runs_repository=runs,
+        run_posts_repository=run_posts,
+        posts_repository=SimpleNamespace(),
+        events_repository=SimpleNamespace(),
+        settings=_settings(),
+        secrets=SimpleNamespace(),
+        worker_id="test-worker",
+    )
+
+    assert not await run_executor.execute_claimed(
+        RunLease(runs.run, "lease-token")
+    )
+    assert runs.run.status == "stopped"
 
 
 @pytest.mark.asyncio
