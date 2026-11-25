@@ -156,6 +156,59 @@ async def test_changed_content_invalidates_analysis_and_events():
     assert saved["post"]["caption"] == "Updated event announcement"
 
 
+@pytest.mark.asyncio
+async def test_upsert_reports_new_pending_failed_cached_and_changed_posts():
+    repository = PostsRepository(InMemoryCollection())
+    post = _post()
+    content_hash = _content_hash(post)
+
+    new = await repository.upsert_post_with_status(
+        "alice",
+        post,
+        content_hash=content_hash,
+    )
+    pending = await repository.upsert_post_with_status(
+        "alice",
+        post,
+        content_hash=content_hash,
+    )
+    await repository.mark_analysis_failed(
+        "alice",
+        post,
+        content_hash=content_hash,
+        error="HTTP 400",
+    )
+    failed = await repository.upsert_post_with_status(
+        "alice",
+        post,
+        content_hash=content_hash,
+    )
+    await repository.mark_analyzed(
+        "alice",
+        post,
+        content_hash=content_hash,
+        events=[_event()],
+    )
+    analyzed = await repository.upsert_post_with_status(
+        "alice",
+        post,
+        content_hash=content_hash,
+    )
+    changed_post = _post("Updated event announcement")
+    changed = await repository.upsert_post_with_status(
+        "alice",
+        changed_post,
+        content_hash=_content_hash(changed_post),
+    )
+
+    assert new.disposition == "new"
+    assert pending.disposition == "pending"
+    assert failed.disposition == "failed"
+    assert analyzed.disposition == "analyzed"
+    assert analyzed.events == [_event()]
+    assert changed.disposition == "changed"
+
+
 def test_hash_includes_analysis_context():
     post = _post()
     assert _content_hash(post) != analysis_content_hash(

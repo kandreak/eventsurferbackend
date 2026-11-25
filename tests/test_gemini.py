@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -150,3 +151,40 @@ async def test_grouped_extraction_retries_transient_api_errors(monkeypatch):
     assert results == [[]]
     assert create_interaction.await_count == 2
     assert gemini.asyncio.sleep.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_bad_request_logs_model_batch_and_provider_details(
+    monkeypatch,
+    caplog,
+):
+    create_interaction = AsyncMock(
+        side_effect=APIError(
+            400,
+            {
+                "error": {
+                    "status": "INVALID_ARGUMENT",
+                    "message": "Image URL could not be fetched.",
+                }
+            },
+        )
+    )
+    client = _client(create_interaction)
+    monkeypatch.setattr(gemini.genai, "Client", lambda **_: client)
+    extractor = gemini.GeminiExtractor("test-key", "test-model", max_retries=1)
+
+    with caplog.at_level(logging.ERROR, logger="events.ai.gemini"):
+        results = await extractor.extract_events_for_source(
+            [_post("post-1", "Event announcement")],
+            timezone="Europe/Rome",
+            max_images=1,
+        )
+
+    assert len(results) == 1
+    assert isinstance(results[0], APIError)
+    assert "model=test-model" in caplog.text
+    assert "post_ids=['post-1']" in caplog.text
+    assert "http_status=400" in caplog.text
+    assert "provider_status=INVALID_ARGUMENT" in caplog.text
+    assert "Image URL could not be fetched." in caplog.text
+    await extractor.close()

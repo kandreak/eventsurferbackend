@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from typing import Any
 
 from apify_client import ApifyClientAsync
@@ -70,6 +71,7 @@ def _report_template(source_count: int) -> dict[str, Any]:
         "posts_in_lookback": 0,
         "posts_analyzed": 0,
         "posts_cached": 0,
+        "post_cache_dispositions": {},
         "posts_skipped": 0,
         "events_extracted": 0,
         "duplicates_removed": 0,
@@ -140,8 +142,9 @@ async def _collect_posts(
             "APIFY_API_TOKEN is not set; no sources could be collected."
         )
     report["posts_in_lookback"] = len(posts)
+    cache_dispositions: dict[str, str] = {}
     for post in posts:
-        await posts_repository.upsert_post(
+        result = await posts_repository.upsert_post_with_status(
             user_id,
             post,
             content_hash=_post_cache_key(
@@ -151,6 +154,11 @@ async def _collect_posts(
                 max_images=collection.max_images_per_post,
             ),
         )
+        cache_dispositions.setdefault(
+            _post_cache_identity(post),
+            result.disposition,
+        )
+    report["post_cache_dispositions"] = cache_dispositions
     return posts, report
 
 
@@ -169,6 +177,10 @@ def _post_cache_key(
     )
 
 
+def _post_cache_identity(post: SocialPost) -> str:
+    return f"{post.platform}:{post.external_id}"
+
+
 async def _analyze_posts(
     posts: list[SocialPost],
     report: dict[str, Any],
@@ -177,12 +189,16 @@ async def _analyze_posts(
     *,
     posts_repository: PostsRepository,
     user_id: str,
+    run_id: str | None = None,
 ) -> tuple[list[Event], dict[str, Any]]:
     ai_settings = settings.ai
     collection = settings.collection
     events_by_post: dict[str, list[Event]] = {}
     analyzable: list[SocialPost] = []
+    cache_origins: dict[str, str] = {}
+    cache_dispositions = report.setdefault("post_cache_dispositions", {})
     for post in posts:
+        identity = _post_cache_identity(post)
         key = _post_cache_key(
             post,
             model=ai_settings.model,
@@ -190,6 +206,10 @@ async def _analyze_posts(
             max_images=collection.max_images_per_post,
         )
         if not (post.caption or post.media_urls):
+            cache_origins[identity] = cache_dispositions.get(
+                identity,
+                "unknown",
+            )
             report["posts_skipped"] += 1
             report["warnings"].append(
                 f"Skipped post {post.external_id} from {post.source_name}: "
@@ -207,18 +227,41 @@ async def _analyze_posts(
                 reason="Post has no caption or image.",
             )
             continue
-        cached_events = await posts_repository.upsert_post(
+        cache_result = await posts_repository.upsert_post_with_status(
             user_id,
             post,
             content_hash=key,
         )
-        if cached_events is not None:
-            events_by_post[key] = cached_events
+        cache_dispositions.setdefault(identity, cache_result.disposition)
+        cache_origins[identity] = cache_dispositions.get(
+            identity,
+            cache_result.disposition,
+        )
+        if cache_result.events is not None:
+            events_by_post[key] = cache_result.events
             report["posts_cached"] += 1
             continue
         analyzable.append(post)
 
+    cache_counts = Counter(cache_dispositions.values())
+    logger.info(
+        "Run %s analysis cache history: new=%d changed=%d pending=%d "
+        "previously_failed=%d previously_skipped=%d analyzed=%d.",
+        run_id or "unknown",
+        cache_counts["new"],
+        cache_counts["changed"],
+        cache_counts["pending"],
+        cache_counts["failed"],
+        cache_counts["skipped"],
+        cache_counts["analyzed"],
+    )
     report["posts_analyzed"] = len(analyzable)
+    logger.info(
+        "Run %s analyzing %d posts; reusing %d analyzed cache entries.",
+        run_id or "unknown",
+        len(analyzable),
+        report["posts_cached"],
+    )
     if analyzable and not secrets.gemini_api_key:
         error = "GEMINI_API_KEY is not set; retrieved posts were not analyzed."
         report["post_errors"].append(error)
@@ -271,11 +314,20 @@ async def _analyze_posts(
                     if isinstance(result_group, asyncio.CancelledError):
                         raise result_group
                     for post in group:
+                        cache_disposition = cache_origins.get(
+                            _post_cache_identity(post),
+                            "unknown",
+                        )
                         message = (
                             f"{post.source_name} / {post.external_id}: "
-                            f"{result_group}"
+                            f"{result_group} "
+                            f"(cache_disposition={cache_disposition})"
                         )
-                        logger.error("Event extraction failed for %s", message)
+                        logger.error(
+                            "Run %s event extraction failed for %s",
+                            run_id or "unknown",
+                            message,
+                        )
                         report["post_errors"].append(message)
                         await posts_repository.mark_analysis_failed(
                             user_id,
@@ -291,8 +343,20 @@ async def _analyze_posts(
                     continue
                 for post, result in zip(group, result_group, strict=True):
                     if isinstance(result, Exception):
-                        message = f"{post.source_name} / {post.external_id}: {result}"
-                        logger.error("Event extraction failed for %s", message)
+                        cache_disposition = cache_origins.get(
+                            _post_cache_identity(post),
+                            "unknown",
+                        )
+                        message = (
+                            f"{post.source_name} / {post.external_id}: "
+                            f"{result} "
+                            f"(cache_disposition={cache_disposition})"
+                        )
+                        logger.error(
+                            "Run %s event extraction failed for %s",
+                            run_id or "unknown",
+                            message,
+                        )
                         report["post_errors"].append(message)
                         await posts_repository.mark_analysis_failed(
                             user_id,
@@ -343,6 +407,14 @@ async def _analyze_posts(
     report["events_without_dates"] = [
         event.title for event in events if event.date is None
     ]
+    logger.info(
+        "Run %s analysis summary: analyzed=%d cached=%d failed=%d events=%d.",
+        run_id or "unknown",
+        report["posts_analyzed"],
+        report["posts_cached"],
+        len(report["post_errors"]),
+        report["events_extracted"],
+    )
     return events, report
 
 

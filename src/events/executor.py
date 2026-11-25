@@ -206,6 +206,11 @@ class RunExecutor:
         report = previous_report or _report_template(
             len(run.settings_snapshot.sources)
         )
+        logger.info(
+            "Run %s analyze stage started with %d run-scoped posts.",
+            run.run_id,
+            len(posts),
+        )
         await self._runs.update_progress(
             run.run_id,
             lease.token,
@@ -223,6 +228,7 @@ class RunExecutor:
             self._secrets,
             posts_repository=self._posts,
             user_id=run.user_id,
+            run_id=run.run_id,
         )
         await self._run_posts.replace_events(run.run_id, run.user_id, events)
         await self._events.save_events(run.user_id, events)
@@ -238,6 +244,13 @@ class RunExecutor:
             ),
         )
         if report["post_errors"]:
+            logger.error(
+                "Run %s analyze stage finished with %d post errors; "
+                "see per-post errors above for cache origin and provider "
+                "details.",
+                run.run_id,
+                len(report["post_errors"]),
+            )
             raise RuntimeError(
                 f"Analysis failed for {len(report['post_errors'])} post(s)."
             )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import mimetypes
 from typing import cast
 from urllib.parse import urlsplit
@@ -27,6 +28,7 @@ supplied image URLs. An empty events list is valid.
 """
 
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+logger = logging.getLogger("events.ai.gemini")
 
 
 def _image_mime_type(url: str) -> str | None:
@@ -182,10 +184,27 @@ class GeminiExtractor:
                 return results
             except APIError as exc:
                 status_code = exc.code
-                if (
-                    status_code not in _RETRYABLE_STATUS_CODES
-                    or attempt >= self._max_retries
-                ):
+                retry = (
+                    status_code in _RETRYABLE_STATUS_CODES
+                    and attempt < self._max_retries
+                )
+                logger.log(
+                    logging.WARNING if retry else logging.ERROR,
+                    "Gemini request failed: model=%s source=%s/%s "
+                    "post_ids=%s batch_size=%d attempt=%d/%d "
+                    "http_status=%s provider_status=%s details=%s",
+                    self._model,
+                    posts[0].source_name,
+                    posts[0].platform,
+                    [post.external_id for post in posts],
+                    len(posts),
+                    attempt + 1,
+                    self._max_retries + 1,
+                    status_code,
+                    exc.status,
+                    str(exc),
+                )
+                if not retry:
                     return [exc] * len(posts)
                 await asyncio.sleep(min(2**attempt, 8))
             except (ValidationError, ValueError) as exc:

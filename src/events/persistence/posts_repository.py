@@ -1,11 +1,27 @@
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pymongo.asynchronous.collection import AsyncCollection
 
 from events.models import Event, SocialPost
+
+PostCacheDisposition = Literal[
+    "new",
+    "changed",
+    "pending",
+    "failed",
+    "skipped",
+    "analyzed",
+]
+
+
+@dataclass(frozen=True)
+class PostCacheResult:
+    disposition: PostCacheDisposition
+    events: list[Event] | None
 
 
 def analysis_content_hash(
@@ -49,6 +65,20 @@ class PostsRepository:
         *,
         content_hash: str,
     ) -> list[Event] | None:
+        result = await self.upsert_post_with_status(
+            user_id,
+            post,
+            content_hash=content_hash,
+        )
+        return result.events
+
+    async def upsert_post_with_status(
+        self,
+        user_id: str,
+        post: SocialPost,
+        *,
+        content_hash: str,
+    ) -> PostCacheResult:
         identity = self._identity(user_id, post)
         now = datetime.now(UTC)
         existing = await self._collection.find_one(
@@ -71,11 +101,24 @@ class PostsRepository:
                 {"$set": updates},
             )
             if existing.get("analysis_status") == "analyzed":
-                return [
-                    Event.model_validate(event)
-                    for event in existing.get("extracted_events", [])
-                ]
-            return None
+                return PostCacheResult(
+                    disposition="analyzed",
+                    events=[
+                        Event.model_validate(event)
+                        for event in existing.get("extracted_events", [])
+                    ],
+                )
+            status = existing.get("analysis_status")
+            if status == "failed":
+                disposition = "failed"
+            elif status == "skipped":
+                disposition = "skipped"
+            else:
+                disposition = "pending"
+            return PostCacheResult(
+                disposition=disposition,
+                events=None,
+            )
 
         await self._collection.update_one(
             identity,
@@ -94,7 +137,10 @@ class PostsRepository:
             },
             upsert=True,
         )
-        return None
+        return PostCacheResult(
+            disposition="changed" if existing is not None else "new",
+            events=None,
+        )
 
     async def mark_analyzed(
         self,
