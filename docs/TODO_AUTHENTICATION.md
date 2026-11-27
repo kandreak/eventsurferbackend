@@ -1,7 +1,7 @@
 # Authentication implementation — Firebase
 
-**Status:** Not started  
-**Last updated:** 2026-11-26  
+**Status:** In progress  
+**Last updated:** 2026-11-27  
 **Implementation owner:** Copilot, with manual Firebase Console setup by the developer
 
 ## Goal
@@ -85,12 +85,12 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 0 — Inspect and plan
 
-- [ ] Inspect the FastAPI application, routers, dependencies, MongoDB repositories, configuration, and tests.
-- [ ] Inventory every endpoint that reads or writes user-specific data.
-- [ ] Trace how `user_id` is passed into run creation, execution, stop, resume, reporting, and exports.
-- [ ] Inspect how existing user records and development data are keyed.
-- [ ] Identify the least disruptive way to switch authenticated requests to Firebase UID.
-- [ ] Write a concise implementation plan and identify any data migration or compatibility concerns.
+- [x] Inspect the FastAPI application, routers, dependencies, MongoDB repositories, configuration, and tests.
+- [x] Inventory every endpoint that reads or writes user-specific data.
+- [x] Trace how `user_id` is passed into run creation, execution, stop, resume, reporting, and exports.
+- [x] Inspect how existing user records and development data are keyed.
+- [x] Identify the least disruptive way to switch authenticated requests to Firebase UID.
+- [x] Write a concise implementation plan and identify any data migration or compatibility concerns.
 
 **Acceptance criteria**
 - The plan identifies all affected endpoints and code paths.
