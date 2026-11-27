@@ -69,6 +69,12 @@ The local API is available at `http://127.0.0.1:8000`.
 
 ## Firebase Admin configuration
 
+In Firebase Console, register the web app, enable Google and Email/Password
+sign-in, and add the local development host to the authorized domains. Firebase
+owns credentials and provider linking; linking Google and email/password must
+use Firebase's client-side account-linking flow, not email-based account
+merging.
+
 Set `FIREBASE_PROJECT_ID` to the Firebase project ID. For local development,
 set `FIREBASE_SERVICE_ACCOUNT_JSON` to the path of a service-account JSON file
 stored outside the repository. The configured project ID must match the
@@ -86,6 +92,14 @@ client-side configuration and must never contain Admin credentials.
 Protected API requests use `Authorization: Bearer <Firebase ID token>`.
 `/health` remains public. The development sign-in helper that will make it
 easier to obtain and refresh a token is not implemented yet.
+In Swagger at `/docs`, select **Authorize** and paste the raw Firebase ID
+token (without the `Bearer ` prefix).
+
+Older development examples used the MongoDB key `local-user`. Existing records
+under legacy keys are not automatically moved or attached to a Firebase user;
+they remain under their current keys. No live Atlas data inventory or
+migration has been performed. Do not migrate records without an explicit,
+reviewed plan and approval.
 
 If `MONGODB_URI` is not configured, health checks still work; database-backed
 routes return `503 Service Unavailable`.
@@ -237,4 +251,7 @@ The Apify scraper's charge cap is enforced by Apify; provider pricing and other 
 
 ## Security note
 
-Until Firebase authentication and authorization are implemented, `user_id` is caller-supplied. User-scoped database queries provide data isolation within the application, but they do not establish the caller's identity. Keep the API local or otherwise access-restricted during this stage.
+User-specific API routes require a verified Firebase ID token and derive the
+user key from its UID. The local sign-in helper and some setup and verification
+work remain incomplete; keep the API local or otherwise access-restricted
+until the remaining checklist phases are complete.

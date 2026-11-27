@@ -118,14 +118,14 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 2 — Token verification and authenticated principal
 
-- [ ] Add a small authenticated-principal model containing at least `user_id` and optional verified claims such as email.
-- [ ] Implement a reusable FastAPI dependency such as `get_current_user`.
-- [ ] Read the Firebase ID token from `Authorization: Bearer <token>`.
-- [ ] Verify the token using `firebase_admin.auth.verify_id_token`.
-- [ ] Reject missing, malformed, invalid, expired, or otherwise unverifiable tokens with HTTP 401.
-- [ ] Use only the verified token's `uid` as `user_id`.
-- [ ] Avoid logging bearer tokens or sensitive claims.
-- [ ] Configure FastAPI HTTP Bearer security so Swagger/OpenAPI exposes an Authorize control.
+- [x] Add a small authenticated-principal model containing at least `user_id` and optional verified claims such as email.
+- [x] Implement a reusable FastAPI dependency such as `get_current_user`.
+- [x] Read the Firebase ID token from `Authorization: Bearer <token>`.
+- [x] Verify the token using `firebase_admin.auth.verify_id_token`.
+- [x] Reject missing, malformed, invalid, expired, or otherwise unverifiable tokens with HTTP 401.
+- [x] Use only the verified token's `uid` as `user_id`.
+- [x] Avoid logging bearer tokens or sensitive claims.
+- [x] Configure FastAPI HTTP Bearer security so Swagger/OpenAPI exposes an Authorize control.
 
 **Acceptance criteria**
 - A valid Firebase ID token resolves to its Firebase UID.
@@ -135,16 +135,16 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 3 — Protect and migrate API routes
 
-- [ ] Migrate user-scoped routes from `/api/users/{user_id}/...` to `/api/users/me/...`.
-- [ ] Protect settings read and update routes.
-- [ ] Protect user events and JSON/ICS exports.
-- [ ] Protect run creation and listing.
-- [ ] Protect stop-all and per-run stop operations.
-- [ ] Protect run detail and resume operations.
-- [ ] Protect run reports and run-scoped JSON/ICS exports.
-- [ ] Remove request-controlled user IDs from protected route contracts.
-- [ ] Keep `/health` public.
-- [ ] Search for and protect any additional user-specific routes not listed above.
+- [x] Migrate user-scoped routes from `/api/users/{user_id}/...` to `/api/users/me/...`.
+- [x] Protect settings read and update routes.
+- [x] Protect user events and JSON/ICS exports.
+- [x] Protect run creation and listing.
+- [x] Protect stop-all and per-run stop operations.
+- [x] Protect run detail and resume operations.
+- [x] Protect run reports and run-scoped JSON/ICS exports.
+- [x] Remove request-controlled user IDs from protected route contracts.
+- [x] Keep `/health` public.
+- [x] Search for and protect any additional user-specific routes not listed above.
 
 **Acceptance criteria**
 - Every user-specific route requires a verified Firebase ID token.
@@ -154,11 +154,11 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 4 — Run ownership and background execution
 
-- [ ] Ensure a newly created run stores the authenticated Firebase UID as its owner.
-- [ ] Ensure the dispatcher and executor use the owner persisted on the run.
-- [ ] Ensure stop, resume, detail, report, and result-export operations verify both run ID and authenticated owner.
-- [ ] Check internal execution and recovery paths for assumptions that user IDs are caller-supplied.
-- [ ] Preserve current leases, checkpoints, concurrency limits, and resume semantics.
+- [x] Ensure a newly created run stores the authenticated Firebase UID as its owner.
+- [x] Ensure the dispatcher and executor use the owner persisted on the run.
+- [x] Ensure stop, resume, detail, report, and result-export operations verify both run ID and authenticated owner.
+- [x] Check internal execution and recovery paths for assumptions that user IDs are caller-supplied.
+- [x] Preserve current leases, checkpoints, concurrency limits, and resume semantics.
 
 **Acceptance criteria**
 - A run's owner is established at creation and cannot be changed by a later request.
@@ -168,11 +168,14 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 5 — Existing MongoDB data compatibility
 
-- [ ] Confirm all user-scoped repository queries and writes use Firebase UID after authentication is introduced.
+- [x] Confirm all user-scoped repository queries and writes use Firebase UID after authentication is introduced.
 - [ ] Identify whether existing development records keyed by `local-user` or another temporary ID need migration.
-- [ ] Do not silently attach existing data to the first user who logs in.
+- [x] Do not silently attach existing data to the first user who logs in.
 - [ ] If migration is needed, document a deliberate, explicit, safe migration procedure.
-- [ ] Verify existing indexes remain appropriate.
+- [x] Verify existing indexes remain appropriate.
+
+**Compatibility note**
+- Older README examples used `local-user`, but this is not evidence that such records exist in Atlas. No live database inventory was performed. Any legacy records remain untouched and are not migrated or reassigned. Determine actual data and any migration need with the owner before planning a migration.
 
 **Acceptance criteria**
 - No cross-user data leakage is possible.
@@ -181,17 +184,17 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 6 — Tests
 
-- [ ] Test missing Authorization header returns HTTP 401.
-- [ ] Test malformed and invalid tokens return HTTP 401.
-- [ ] Test expired/unverifiable tokens return HTTP 401.
-- [ ] Test a valid token resolves to the expected Firebase UID.
-- [ ] Test `/health` remains public.
-- [ ] Test authentication on every protected endpoint group.
-- [ ] Test one user cannot access another user's settings or events.
-- [ ] Test one user cannot access another user's runs, reports, or exports.
-- [ ] Test run stop and resume ownership checks.
-- [ ] Test existing run execution, checkpoint, and resume behaviour.
-- [ ] Use mocked Firebase verification or FastAPI dependency overrides; do not call Firebase in the default test suite.
+- [x] Test missing Authorization header returns HTTP 401.
+- [x] Test malformed and invalid tokens return HTTP 401.
+- [x] Test expired/unverifiable tokens return HTTP 401.
+- [x] Test a valid token resolves to the expected Firebase UID.
+- [x] Test `/health` remains public.
+- [x] Test authentication on every protected endpoint group.
+- [x] Test one user cannot access another user's settings or events.
+- [x] Test one user cannot access another user's runs, reports, or exports.
+- [x] Test run stop and resume ownership checks.
+- [x] Test existing run execution, checkpoint, and resume behaviour.
+- [x] Use mocked Firebase verification or FastAPI dependency overrides; do not call Firebase in the default test suite.
 
 **Acceptance criteria**
 - Relevant unit and API tests pass.
@@ -208,10 +211,10 @@ Copilot must inspect the current repository before editing. Update this checklis
 - [ ] Ensure the helper can obtain a refreshed ID token when the previous
       one has expired.
 - [ ] Serve or expose the helper only in local development.
-- [ ] Do not introduce an insecure production backend endpoint for login
+- [x] Do not introduce an insecure production backend endpoint for login
       or token generation.
-- [ ] Configure Swagger/OpenAPI with HTTP Bearer authentication.
-- [ ] Document how to use the copied token in Swagger's Authorize control.
+- [x] Configure Swagger/OpenAPI with HTTP Bearer authentication.
+- [x] Document how to use the copied token in Swagger's Authorize control.
 - [ ] Verify authenticated requests work through `/docs`.
 
 **Acceptance criteria**
@@ -224,25 +227,30 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 8 — Documentation and final verification
 
-- [ ] Update README to describe the implemented authentication state accurately.
-- [ ] Document Firebase project setup and enabled providers.
-- [ ] Document required environment variables and local credentials.
-- [ ] Document production credential configuration.
-- [ ] Document Google and email/password account-linking behaviour.
-- [ ] Document `/api/users/me/...` routes and Swagger authentication.
-- [ ] Update `.env.example` without adding secrets.
-- [ ] Run the complete default test suite.
-- [ ] Review all permanent constraints in this document.
-- [ ] Summarize completed work, tests run, migration needs, and remaining manual steps.
+- [x] Update README to describe the implemented authentication state accurately.
+- [x] Document Firebase project setup and enabled providers.
+- [x] Document required environment variables and local credentials.
+- [x] Document production credential configuration.
+- [x] Document Google and email/password account-linking behaviour.
+- [x] Document `/api/users/me/...` routes and Swagger authentication.
+- [x] Update `.env.example` without adding secrets.
+- [x] Run the complete default test suite.
+- [x] Review all permanent constraints in this document.
+- [x] Summarize completed work, tests run, migration needs, and remaining manual steps.
 - [ ] Document the local sign-in helper URL and its development-only
       availability.
-- [ ] Document the distinction between Firebase Web App configuration
+- [x] Document the distinction between Firebase Web App configuration
       and Firebase Admin service-account credentials.
 
 **Acceptance criteria**
 - A developer can configure Firebase and run the authenticated backend by following the documentation.
 - No known user-specific endpoint is left unprotected.
 - All checklist items are either verified complete or explicitly left pending with an explanation.
+
+**Audit notes**
+- Phase 5 data inventory and any migration procedure remain pending: no live MongoDB/Atlas records were inspected, and no records were changed or reassigned.
+- Phase 7's local sign-in helper and its URL do not exist yet. A real authenticated request through `/docs` also remains unverified because no Firebase project credentials or live token were used; Swagger's Bearer security metadata and mocked auth behavior are tested.
+- Firebase Console provider setup remains a developer action. The overall local sign-in acceptance criteria therefore remain incomplete until the helper is implemented and verified.
 
 ## Copilot session rules
 
@@ -261,3 +269,5 @@ Copilot must inspect the current repository before editing. Update this checklis
 |---|---|---|---|
 | 2026-11-26 | Initial | Scope changed to Google + Firebase email/password; Facebook removed | Firebase provider setup and implementation pending |
 | 2026-11-27 | Phase 1 | Added Firebase Admin configuration for local service-account files and production ADC; validates project IDs, reuses the default app, documents configuration, and ignores common credential filenames. Migrated API request tests to `/api/users/me` and added mocked auth/config tests for existing authentication groundwork. | Firebase Console setup, complete auth/ownership test coverage, development sign-in helper, and remaining checklist phases pending. |
+| 2026-11-27 | Phase 2 | Completed the authenticated principal and Firebase ID-token dependency; added bearer handling, safe 401 responses, Swagger security metadata, and tests for missing/malformed/invalid/unverifiable tokens, UID extraction, and dependency overrides. | Phases 3–8 and manual Firebase Console setup remain. |
+| 2026-11-27 | Phases 3–8 audit | Verified protected `/api/users/me/...` routes, owner-scoped run operations/background execution, UID-scoped persistence/indexes, and existing run behavior. Added auth coverage asserting every protected user route rejects missing credentials; clarified README setup, Swagger token use, account linking, and legacy-data behavior. Full suite: 85 passed, 12 skipped. | No live MongoDB inventory or migration; Firebase Console setup and local sign-in helper remain. End-to-end valid-token Swagger flow not verified. |
