@@ -14,11 +14,7 @@ from events.models import Event, EventStatus, SourceConfig
 
 UserId = Annotated[
     str,
-    Field(
-        min_length=1,
-        max_length=128,
-        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
-    ),
+    Field(min_length=1, max_length=128),
 ]
 RunStage = Literal["collect", "analyze", "publish"]
 RunStatus = Literal[

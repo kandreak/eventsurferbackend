@@ -98,15 +98,15 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 1 — Firebase Admin setup
 
-- [ ] Add `firebase-admin` to project dependencies.
-- [ ] Implement one centralized Firebase Admin initialization path.
-- [ ] Support local development using a service-account JSON file referenced by an environment variable or the existing project configuration convention.
-- [ ] Support production credentials through Application Default Credentials.
-- [ ] Configure and validate the Firebase project ID.
-- [ ] Ensure initialization is safe across the FastAPI application lifecycle and does not create duplicate Firebase app instances.
-- [ ] Update `.env.example` with variable names and safe placeholders only.
-- [ ] Ensure credentials are excluded from Git.
-- [ ] Keep Firebase Web App configuration separate from Firebase Admin
+- [x] Add `firebase-admin` to project dependencies.
+- [x] Implement one centralized Firebase Admin initialization path.
+- [x] Support local development using a service-account JSON file referenced by an environment variable or the existing project configuration convention.
+- [x] Support production credentials through Application Default Credentials.
+- [x] Configure and validate the Firebase project ID.
+- [x] Ensure initialization is safe across the FastAPI application lifecycle and does not create duplicate Firebase app instances.
+- [x] Update `.env.example` with variable names and safe placeholders only.
+- [x] Ensure credentials are excluded from Git.
+- [x] Keep Firebase Web App configuration separate from Firebase Admin
       credentials; document which environment variables are public
       client configuration and which are private backend configuration.
 
@@ -260,3 +260,4 @@ Copilot must inspect the current repository before editing. Update this checklis
 | Date | Phase | Work completed | Remaining work / blockers |
 |---|---|---|---|
 | 2026-11-26 | Initial | Scope changed to Google + Firebase email/password; Facebook removed | Firebase provider setup and implementation pending |
+| 2026-11-27 | Phase 1 | Added Firebase Admin configuration for local service-account files and production ADC; validates project IDs, reuses the default app, documents configuration, and ignores common credential filenames. Migrated API request tests to `/api/users/me` and added mocked auth/config tests for existing authentication groundwork. | Firebase Console setup, complete auth/ownership test coverage, development sign-in helper, and remaining checklist phases pending. |

@@ -1,10 +1,8 @@
-from typing import Annotated
+from fastapi import APIRouter, HTTPException, status
 
-from fastapi import APIRouter, HTTPException, Path, status
-
-from events.api.dependencies import UsersRepositoryDependency
+from events.api.dependencies import CurrentUser, UsersRepositoryDependency
 from events.api.errors import API_ERROR_RESPONSES
-from events.api.schemas import UserId, UserSettings
+from events.api.schemas import UserSettings
 from events.persistence.users_repository import SourceLimitReached
 
 router = APIRouter(
@@ -14,12 +12,12 @@ router = APIRouter(
 )
 
 
-@router.get("/{user_id}/settings", response_model=UserSettings)
+@router.get("/me/settings", response_model=UserSettings)
 async def get_user_settings(
-    user_id: Annotated[UserId, Path()],
+    current_user: CurrentUser,
     repository: UsersRepositoryDependency,
 ) -> UserSettings:
-    settings = await repository.get_settings(user_id)
+    settings = await repository.get_settings(current_user.user_id)
     if settings is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -28,14 +26,14 @@ async def get_user_settings(
     return settings
 
 
-@router.put("/{user_id}/settings", response_model=UserSettings)
+@router.put("/me/settings", response_model=UserSettings)
 async def put_user_settings(
-    user_id: Annotated[UserId, Path()],
+    current_user: CurrentUser,
     settings: UserSettings,
     repository: UsersRepositoryDependency,
 ) -> UserSettings:
     try:
-        return await repository.put_settings(user_id, settings)
+        return await repository.put_settings(current_user.user_id, settings)
     except SourceLimitReached as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

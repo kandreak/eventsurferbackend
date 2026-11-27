@@ -10,27 +10,27 @@ The backend currently provides:
 
 - FastAPI health endpoint: `GET /health`.
 - Per-user settings:
-  - `GET /api/users/{user_id}/settings`
-  - `PUT /api/users/{user_id}/settings`
+  - `GET /api/users/me/settings`
+  - `PUT /api/users/me/settings`
 - User-scoped events:
-  - `GET /api/users/{user_id}/events`
-  - `GET /api/users/{user_id}/events.json`
-  - `GET /api/users/{user_id}/events.ics`
+  - `GET /api/users/me/events`
+  - `GET /api/users/me/events.json`
+  - `GET /api/users/me/events.ics`
 - Run management:
-  - `POST /api/users/{user_id}/runs` — queue a run.
-  - `POST /api/users/{user_id}/runs/stop` — stop queued runs and request cooperative cancellation of active runs.
-  - `POST /api/users/{user_id}/runs/{run_id}/stop` — stop one run.
-  - `GET /api/users/{user_id}/runs` — list runs.
-  - `GET /api/users/{user_id}/runs/{run_id}` — inspect a run.
-  - `POST /api/users/{user_id}/runs/{run_id}/resume` — resume a failed run.
-  - `GET /api/users/{user_id}/runs/{run_id}/report` — retrieve its report.
-  - `GET /api/users/{user_id}/runs/{run_id}/events.json` and `events.ics` — retrieve run results.
+  - `POST /api/users/me/runs` — queue a run.
+  - `POST /api/users/me/runs/stop` — stop queued runs and request cooperative cancellation of active runs.
+  - `POST /api/users/me/runs/{run_id}/stop` — stop one run.
+  - `GET /api/users/me/runs` — list runs.
+  - `GET /api/users/me/runs/{run_id}` — inspect a run.
+  - `POST /api/users/me/runs/{run_id}/resume` — resume a failed run.
+  - `GET /api/users/me/runs/{run_id}/report` — retrieve its report.
+  - `GET /api/users/me/runs/{run_id}/events.json` and `events.ics` — retrieve run results.
 - MongoDB persistence for user settings, collected posts and analysis cache, deduplicated events, runs, run-scoped results, reports, checkpoints, leases, and resume state.
 - A dispatcher started by the FastAPI lifespan that executes queued runs in the API process. There is currently no separate worker command or CLI pipeline.
 - API validation and consistent error responses.
 - User-data scoping and cross-user isolation tests.
 
-**Authentication is not implemented yet.** The current `user_id` in API paths is caller-supplied and is an application-level identifier, not proof of identity. Do not expose this development API as a public multi-user service until authentication and authorization are implemented. The intended authentication provider is Firebase Authentication with Google and email/password sign-in. See [`docs/TODO_AUTHENTICATION.md`](docs/TODO_AUTHENTICATION.md).
+Firebase Authentication is being implemented. User-specific routes now use `/api/users/me/...` and derive the MongoDB user key from a verified Firebase ID token. The local sign-in helper and final setup workflow are still pending, so do not expose this service publicly until the remaining items in [`docs/TODO_AUTHENTICATION.md`](docs/TODO_AUTHENTICATION.md) are complete.
 
 ## Requirements
 
@@ -67,17 +67,39 @@ The local API is available at `http://127.0.0.1:8000`.
 - OpenAPI schema: `http://127.0.0.1:8000/openapi.json`
 - Health check: `http://127.0.0.1:8000/health`
 
-If `MONGODB_URI` is not configured, health checks still work; database-backed routes return `503 Service Unavailable`.
+## Firebase Admin configuration
+
+Set `FIREBASE_PROJECT_ID` to the Firebase project ID. For local development,
+set `FIREBASE_SERVICE_ACCOUNT_JSON` to the path of a service-account JSON file
+stored outside the repository. The configured project ID must match the
+service-account file. Never put service-account credentials in `.env`, source
+control, or browser code; `.env` should contain only the path and is ignored by
+Git.
+
+In production, omit `FIREBASE_SERVICE_ACCOUNT_JSON`, configure Google
+Application Default Credentials (for example, `GOOGLE_APPLICATION_CREDENTIALS`
+pointing to a credential file mounted outside the application source), and set
+`FIREBASE_PROJECT_ID`. The backend initializes Firebase Admin lazily on the
+first authenticated request. Firebase Web App configuration is separate,
+client-side configuration and must never contain Admin credentials.
+
+Protected API requests use `Authorization: Bearer <Firebase ID token>`.
+`/health` remains public. The development sign-in helper that will make it
+easier to obtain and refresh a token is not implemented yet.
+
+If `MONGODB_URI` is not configured, health checks still work; database-backed
+routes return `503 Service Unavailable`.
 
 ## Basic API workflow
 
-The examples below use the current development API, which is not yet authenticated.
+The examples assume `$idToken` is a valid Firebase ID token obtained from a
+Firebase client. A local helper is planned but not yet available.
 
 Save a user's sources:
 
 ```powershell
 $base = "http://127.0.0.1:8000"
-$userId = "local-user"
+$headers = @{ Authorization = "Bearer $idToken" }
 
 $settings = @{
     timezone = "Europe/Rome"
@@ -90,16 +112,21 @@ $settings = @{
 } | ConvertTo-Json -Depth 5
 
 Invoke-RestMethod -Method Put `
-    -Uri "$base/api/users/$userId/settings" `
+    -Uri "$base/api/users/me/settings" `
     -ContentType "application/json" `
+    -Headers $headers `
     -Body $settings
 ```
 
 Create a run and inspect it:
 
 ```powershell
-$run = Invoke-RestMethod -Method Post -Uri "$base/api/users/$userId/runs"
-Invoke-RestMethod -Uri "$base/api/users/$userId/runs/$($run.run_id)"
+$run = Invoke-RestMethod -Method Post `
+    -Uri "$base/api/users/me/runs" `
+    -Headers $headers
+Invoke-RestMethod `
+    -Uri "$base/api/users/me/runs/$($run.run_id)" `
+    -Headers $headers
 ```
 
 Run creation, resume, and stop return `202 Accepted`. The FastAPI process dispatches work in the background, so the HTTP request does not wait for external providers. Poll run detail until the run is `succeeded` or `failed`, then retrieve its `/report`, `/events.json`, or `/events.ics` output.

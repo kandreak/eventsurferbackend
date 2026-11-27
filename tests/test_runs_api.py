@@ -169,7 +169,7 @@ class InMemoryRunDispatcher:
 
 
 @pytest.fixture(autouse=True)
-def disable_database_connection(monkeypatch):
+def disable_database_connection(monkeypatch, use_test_auth_override):
     monkeypatch.setattr(
         app_module,
         "BackendSettings",
@@ -191,18 +191,21 @@ def test_runs_api_creates_lists_scopes_and_resumes_runs():
     )
     try:
         with TestClient(app) as client:
-            created = client.post("/api/users/alice/runs")
-            rejected = client.post("/api/users/alice/runs")
-            listed = client.get("/api/users/alice/runs")
+            created = client.post("/api/users/me/runs")
+            rejected = client.post("/api/users/me/runs")
+            listed = client.get("/api/users/me/runs")
             fetched = client.get(
-                f"/api/users/alice/runs/{created.json()['run_id']}"
+                f"/api/users/me/runs/{created.json()['run_id']}"
             )
-            wrong_user_list = client.get("/api/users/bob/runs")
+            wrong_user_list = client.get(
+                "/api/users/me/runs",
+                headers={"X-Test-User": "bob"},
+            )
             unavailable_events = client.get(
-                f"/api/users/alice/runs/{created.json()['run_id']}/events.json"
+                f"/api/users/me/runs/{created.json()['run_id']}/events.json"
             )
             unavailable_report = client.get(
-                f"/api/users/alice/runs/{created.json()['run_id']}/report"
+                f"/api/users/me/runs/{created.json()['run_id']}/report"
             )
             runs_repository.runs[0].status = "succeeded"
             runs_repository.runs[0].report = {"events_extracted": 1}
@@ -212,32 +215,37 @@ def test_runs_api_creates_lists_scopes_and_resumes_runs():
                 "publish": datetime.now(UTC),
             }
             run_events = client.get(
-                f"/api/users/alice/runs/{created.json()['run_id']}/events.json"
+                f"/api/users/me/runs/{created.json()['run_id']}/events.json"
             )
             run_calendar = client.get(
-                f"/api/users/alice/runs/{created.json()['run_id']}/events.ics"
+                f"/api/users/me/runs/{created.json()['run_id']}/events.ics"
             )
             run_report = client.get(
-                f"/api/users/alice/runs/{created.json()['run_id']}/report"
+                f"/api/users/me/runs/{created.json()['run_id']}/report"
             )
             wrong_user = client.get(
-                f"/api/users/bob/runs/{created.json()['run_id']}"
+                f"/api/users/me/runs/{created.json()['run_id']}",
+                headers={"X-Test-User": "bob"},
             )
             wrong_user_events = client.get(
-                f"/api/users/bob/runs/{created.json()['run_id']}/events.json"
+                f"/api/users/me/runs/{created.json()['run_id']}/events.json",
+                headers={"X-Test-User": "bob"},
             )
             wrong_user_calendar = client.get(
-                f"/api/users/bob/runs/{created.json()['run_id']}/events.ics"
+                f"/api/users/me/runs/{created.json()['run_id']}/events.ics",
+                headers={"X-Test-User": "bob"},
             )
             wrong_user_report = client.get(
-                f"/api/users/bob/runs/{created.json()['run_id']}/report"
+                f"/api/users/me/runs/{created.json()['run_id']}/report",
+                headers={"X-Test-User": "bob"},
             )
             wrong_user_resume = client.post(
-                f"/api/users/bob/runs/{created.json()['run_id']}/resume"
+                f"/api/users/me/runs/{created.json()['run_id']}/resume",
+                headers={"X-Test-User": "bob"},
             )
             runs_repository.runs[0].status = "failed"
             resumed = client.post(
-                f"/api/users/alice/runs/{created.json()['run_id']}/resume"
+                f"/api/users/me/runs/{created.json()['run_id']}/resume"
             )
     finally:
         app.dependency_overrides.clear()
@@ -283,7 +291,7 @@ def test_run_creation_requires_saved_sources():
     )
     try:
         with TestClient(app) as client:
-            response = client.post("/api/users/alice/runs")
+            response = client.post("/api/users/me/runs")
     finally:
         app.dependency_overrides.clear()
 
@@ -300,7 +308,7 @@ def test_configured_outstanding_limit_allows_queued_runs_up_to_the_limit():
     try:
         with TestClient(app) as client:
             responses = [
-                client.post("/api/users/alice/runs")
+                client.post("/api/users/me/runs")
                 for _ in range(4)
             ]
     finally:
@@ -324,13 +332,17 @@ def test_stopping_user_runs_stops_queued_and_requests_running_cancellation():
     try:
         with TestClient(app) as client:
             for _ in range(2):
-                client.post("/api/users/alice/runs")
-            bob_run = client.post("/api/users/bob/runs").json()
+                client.post("/api/users/me/runs")
+            bob_run = client.post(
+                "/api/users/me/runs",
+                headers={"X-Test-User": "bob"},
+            ).json()
             runs_repository.runs[1].status = "running"
 
-            response = client.post("/api/users/alice/runs/stop")
+            response = client.post("/api/users/me/runs/stop")
             bob_after_stop = client.get(
-                f"/api/users/bob/runs/{bob_run['run_id']}"
+                f"/api/users/me/runs/{bob_run['run_id']}",
+                headers={"X-Test-User": "bob"},
             )
     finally:
         app.dependency_overrides.clear()
@@ -354,16 +366,20 @@ def test_stopping_single_run_is_scoped_to_the_requested_user_and_run():
     )
     try:
         with TestClient(app) as client:
-            alice_run = client.post("/api/users/alice/runs").json()
-            bob_run = client.post("/api/users/bob/runs").json()
+            alice_run = client.post("/api/users/me/runs").json()
+            bob_run = client.post(
+                "/api/users/me/runs",
+                headers={"X-Test-User": "bob"},
+            ).json()
             stopped = client.post(
-                f"/api/users/alice/runs/{alice_run['run_id']}/stop"
+                f"/api/users/me/runs/{alice_run['run_id']}/stop"
             )
             wrong_user = client.post(
-                f"/api/users/alice/runs/{bob_run['run_id']}/stop"
+                f"/api/users/me/runs/{bob_run['run_id']}/stop"
             )
             bob_after_stop = client.get(
-                f"/api/users/bob/runs/{bob_run['run_id']}"
+                f"/api/users/me/runs/{bob_run['run_id']}",
+                headers={"X-Test-User": "bob"},
             )
     finally:
         app.dependency_overrides.clear()
@@ -391,7 +407,7 @@ def test_run_creation_returns_429_when_the_weekly_limit_is_reached():
     )
     try:
         with TestClient(app) as client:
-            response = client.post("/api/users/alice/runs")
+            response = client.post("/api/users/me/runs")
     finally:
         app.dependency_overrides.clear()
 

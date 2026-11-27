@@ -10,7 +10,7 @@ from events.persistence.users_repository import SourceLimitReached
 
 
 @pytest.fixture(autouse=True)
-def disable_database_connection(monkeypatch):
+def disable_database_connection(monkeypatch, use_test_auth_override):
     monkeypatch.setattr(
         app_module,
         "BackendSettings",
@@ -42,7 +42,7 @@ def test_settings_api_creates_updates_and_scopes_settings_by_user():
     try:
         with TestClient(app) as client:
             first = client.put(
-                "/api/users/alice/settings",
+                "/api/users/me/settings",
                 json={
                     "timezone": "Europe/Rome",
                     "sources": [
@@ -56,12 +56,19 @@ def test_settings_api_creates_updates_and_scopes_settings_by_user():
                 },
             )
             second = client.put(
-                "/api/users/bob/settings",
+                "/api/users/me/settings",
                 json={"timezone": "UTC", "sources": []},
+                headers={"X-Test-User": "bob"},
             )
-            fetched = client.get("/api/users/alice/settings")
-            fetched_bob = client.get("/api/users/bob/settings")
-            missing = client.get("/api/users/unknown/settings")
+            fetched = client.get("/api/users/me/settings")
+            fetched_bob = client.get(
+                "/api/users/me/settings",
+                headers={"X-Test-User": "bob"},
+            )
+            missing = client.get(
+                "/api/users/me/settings",
+                headers={"X-Test-User": "unknown"},
+            )
     finally:
         app.dependency_overrides.clear()
 
@@ -79,7 +86,7 @@ def test_settings_api_rejects_invalid_settings():
     try:
         with TestClient(app) as client:
             response = client.put(
-                "/api/users/alice/settings",
+                "/api/users/me/settings",
                 json={"timezone": "Not/A_Timezone", "sources": []},
             )
     finally:
@@ -103,7 +110,7 @@ def test_settings_api_rejects_more_than_the_configured_source_limit():
     try:
         with TestClient(app) as client:
             response = client.put(
-                "/api/users/alice/settings",
+                "/api/users/me/settings",
                 json={"timezone": "UTC", "sources": sources},
             )
     finally:
@@ -124,7 +131,7 @@ def test_database_routes_return_503_when_mongodb_is_not_configured(monkeypatch):
     )
     with TestClient(app) as client:
         health = client.get("/health")
-        settings = client.get("/api/users/alice/settings")
+        settings = client.get("/api/users/me/settings")
 
     assert health.status_code == 200
     assert settings.status_code == 503

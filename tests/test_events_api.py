@@ -99,7 +99,7 @@ class InMemoryUsersRepository:
 
 
 @pytest.fixture(autouse=True)
-def disable_database_connection(monkeypatch):
+def disable_database_connection(monkeypatch, use_test_auth_override):
     monkeypatch.setattr(
         app_module,
         "BackendSettings",
@@ -157,9 +157,9 @@ async def test_events_api_filters_by_user_date_source_and_status_and_exports():
     )
     try:
         with TestClient(app) as client:
-            all_events = client.get("/api/users/alice/events.json")
+            all_events = client.get("/api/users/me/events.json")
             filtered = client.get(
-                "/api/users/alice/events",
+                "/api/users/me/events",
                 params={
                     "date_from": "2026-08-01",
                     "date_to": "2026-08-31",
@@ -168,18 +168,21 @@ async def test_events_api_filters_by_user_date_source_and_status_and_exports():
                 },
             )
             archived = client.get(
-                "/api/users/alice/events.json",
+                "/api/users/me/events.json",
                 params={"status": "archived"},
             )
-            other_user = client.get("/api/users/bob/events")
+            other_user = client.get(
+                "/api/users/me/events",
+                headers={"X-Test-User": "bob"},
+            )
             invalid_range = client.get(
-                "/api/users/alice/events",
+                "/api/users/me/events",
                 params={
                     "date_from": "2026-12-01",
                     "date_to": "2026-08-01",
                 },
             )
-            calendar = client.get("/api/users/alice/events.ics")
+            calendar = client.get("/api/users/me/events.ics")
     finally:
         app.dependency_overrides.clear()
 

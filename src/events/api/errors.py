@@ -24,6 +24,8 @@ API_ERROR_RESPONSES = {
     }
     for status_code, description in (
         (400, "Invalid request."),
+        (401, "Authentication required."),
+        (403, "Access denied."),
         (404, "Resource not found."),
         (409, "Request conflicts with current state."),
         (422, "Request validation failed."),

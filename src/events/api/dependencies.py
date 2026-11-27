@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, status
 from pymongo.asynchronous.database import AsyncDatabase
 
+from events.auth.dependencies import CurrentUser
 from events.config import RunExecutionSettings, UserLimits
 from events.dispatcher import RunDispatcher
 from events.persistence.events_repository import EventsRepository

@@ -13,7 +13,7 @@ from events.core.settings import BackendSettings
 
 
 @pytest.fixture(autouse=True)
-def disable_database_connection(monkeypatch):
+def disable_database_connection(monkeypatch, use_test_auth_override):
     monkeypatch.setattr(
         app_module,
         "BackendSettings",
@@ -28,7 +28,7 @@ def test_request_validation_uses_a_stable_error_shape():
     try:
         with TestClient(app) as client:
             response = client.put(
-                "/api/users/alice/settings",
+                "/api/users/me/settings",
                 json={"timezone": "Not/A_Timezone", "sources": []},
             )
     finally:
@@ -52,7 +52,7 @@ def test_missing_resource_uses_the_same_error_envelope():
     )
     try:
         with TestClient(app) as client:
-            response = client.get("/api/users/alice/settings")
+            response = client.get("/api/users/me/settings")
     finally:
         app.dependency_overrides.clear()
 
@@ -71,7 +71,7 @@ def test_malformed_persisted_data_returns_a_sanitized_server_error():
     )
     try:
         with TestClient(app) as client:
-            response = client.get("/api/users/alice/settings")
+            response = client.get("/api/users/me/settings")
     finally:
         app.dependency_overrides.clear()
 
@@ -92,7 +92,7 @@ def test_unexpected_repository_errors_are_logged_and_not_success_shaped(
     )
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            response = client.get("/api/users/alice/settings")
+            response = client.get("/api/users/me/settings")
     finally:
         app.dependency_overrides.clear()
 
@@ -112,7 +112,7 @@ def test_database_outage_is_reported_as_service_unavailable():
     )
     try:
         with TestClient(app) as client:
-            response = client.get("/api/users/alice/settings")
+            response = client.get("/api/users/me/settings")
     finally:
         app.dependency_overrides.clear()
 
@@ -134,7 +134,7 @@ def test_calendar_export_requires_user_settings():
     )
     try:
         with TestClient(app) as client:
-            response = client.get("/api/users/alice/events.ics")
+            response = client.get("/api/users/me/events.ics")
     finally:
         app.dependency_overrides.clear()
 

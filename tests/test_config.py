@@ -68,9 +68,11 @@ def test_invalid_json_configuration_is_reported(tmp_path):
         load_settings(settings_path)
 
 
-def test_user_id_cannot_escape_its_api_scope():
-    with pytest.raises(ValidationError, match="pattern"):
-        TypeAdapter(UserId).validate_python("../another-user")
+def test_firebase_user_id_is_bounded_without_path_constraints():
+    assert TypeAdapter(UserId).validate_python("firebase:user/123")
+
+    with pytest.raises(ValidationError, match="at most 128"):
+        TypeAdapter(UserId).validate_python("u" * 129)
 
 
 def test_source_name_is_optional_and_falls_back_to_the_full_url():
