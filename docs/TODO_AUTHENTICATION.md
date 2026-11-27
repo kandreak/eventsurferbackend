@@ -69,13 +69,13 @@ These are architectural requirements, not checklist items. Do not change them wi
 
 These steps are completed manually by the repository owner.
 
-- [ ] Register the EventSurfer Web app in the Firebase project.
-- [ ] Record the Firebase project ID and Web App configuration.
-- [ ] Enable Google as a sign-in provider.
-- [ ] Enable Email/Password as a sign-in provider.
+- [x] Register the EventSurfer Web app in the Firebase project.
+- [x] Record the Firebase project ID and Web App configuration.
+- [x] Enable Google as a sign-in provider.
+- [x] Enable Email/Password as a sign-in provider.
 - [ ] Configure the Firebase authorized domains needed for local development (including `localhost` if required).
 - [ ] Confirm the Firebase project is in the intended billing/plan state before using any paid services.
-- [ ] Keep any service-account credentials outside the repository and out of version control.
+- [x] Keep any service-account credentials outside the repository and out of version control.
 
 Do not enable Facebook for this implementation.
 
