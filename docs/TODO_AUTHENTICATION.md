@@ -30,6 +30,10 @@ These are architectural requirements, not checklist items. Do not change them wi
 - Do not implement custom JWT issuance, refresh-token management, password reset, or OAuth callback handling in the backend.
 - Do not create a separate EventSurfer account for each sign-in method.
 - Account linking between Google and email/password must be handled through Firebase's supported client-side account-linking flow. Do not merge accounts merely because their email addresses match.
+- Firebase Web App configuration (API key, auth domain, project ID, app ID)
+  is client-side configuration, not a service-account credential. Keep it
+  separate from backend secrets and never expose service-account credentials
+  to the browser.
 
 ### MongoDB and existing application data
 
@@ -56,6 +60,10 @@ These are architectural requirements, not checklist items. Do not change them wi
 - Do not add a separate worker process.
 - Keep the implementation focused and consistent with the existing codebase.
 - Automated tests must not require live Firebase credentials.
+- The local sign-in helper is development-only and must not be exposed as
+  a production authentication interface.
+- Do not introduce a frontend build system or additional infrastructure
+  solely for the local Swagger sign-in helper unless genuinely necessary.
 
 ## Developer setup checklist (Firebase Console)
 
@@ -98,6 +106,9 @@ Copilot must inspect the current repository before editing. Update this checklis
 - [ ] Ensure initialization is safe across the FastAPI application lifecycle and does not create duplicate Firebase app instances.
 - [ ] Update `.env.example` with variable names and safe placeholders only.
 - [ ] Ensure credentials are excluded from Git.
+- [ ] Keep Firebase Web App configuration separate from Firebase Admin
+      credentials; document which environment variables are public
+      client configuration and which are private backend configuration.
 
 **Acceptance criteria**
 - Local and production credential strategies are documented.
@@ -189,17 +200,26 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 ### Phase 7 — Local sign-in and Swagger workflow
 
-- [ ] Provide a minimal local-only sign-in helper using the Firebase Web SDK if needed.
-- [ ] The helper must support Google sign-in and email/password sign-up/sign-in.
-- [ ] The helper must display or copy the Firebase ID token for local Swagger testing.
-- [ ] Ensure the helper is not an insecure production backend endpoint.
-- [ ] Document how to use the token in Swagger's Authorize control.
+- [ ] Provide a minimal local-only sign-in helper using the Firebase Web SDK.
+- [ ] Support Google sign-in and email/password sign-up and sign-in.
+- [ ] Use the Firebase Web App configuration, never Admin SDK credentials,
+      in the browser.
+- [ ] Allow the developer to retrieve and copy the current Firebase ID token.
+- [ ] Ensure the helper can obtain a refreshed ID token when the previous
+      one has expired.
+- [ ] Serve or expose the helper only in local development.
+- [ ] Do not introduce an insecure production backend endpoint for login
+      or token generation.
+- [ ] Configure Swagger/OpenAPI with HTTP Bearer authentication.
+- [ ] Document how to use the copied token in Swagger's Authorize control.
 - [ ] Verify authenticated requests work through `/docs`.
 
 **Acceptance criteria**
 - The developer can sign in locally using Google or email/password.
-- The developer can copy the resulting Firebase ID token into Swagger.
+- The developer can copy a valid Firebase ID token into Swagger.
 - Protected API calls work from Swagger.
+- Expired tokens can be refreshed through the Firebase client SDK.
+- The helper is unavailable in production.
 - No token-generation or credential-bypass endpoint is introduced.
 
 ### Phase 8 — Documentation and final verification
@@ -214,6 +234,10 @@ Copilot must inspect the current repository before editing. Update this checklis
 - [ ] Run the complete default test suite.
 - [ ] Review all permanent constraints in this document.
 - [ ] Summarize completed work, tests run, migration needs, and remaining manual steps.
+- [ ] Document the local sign-in helper URL and its development-only
+      availability.
+- [ ] Document the distinction between Firebase Web App configuration
+      and Firebase Admin service-account credentials.
 
 **Acceptance criteria**
 - A developer can configure Firebase and run the authenticated backend by following the documentation.
