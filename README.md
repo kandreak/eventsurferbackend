@@ -30,7 +30,7 @@ The backend currently provides:
 - API validation and consistent error responses.
 - User-data scoping and cross-user isolation tests.
 
-Firebase Authentication is being implemented. User-specific routes now use `/api/users/me/...` and derive the MongoDB user key from a verified Firebase ID token. The local sign-in helper and final setup workflow are still pending, so do not expose this service publicly until the remaining items in [`docs/TODO_AUTHENTICATION.md`](docs/TODO_AUTHENTICATION.md) are complete.
+Firebase Authentication protects user-specific routes under `/api/users/me/...` and derives the MongoDB user key from a verified Firebase ID token. For local API use, authorize through Swagger's existing `/docs` control. Complete Firebase Console setup and review the remaining items in [`docs/TODO_AUTHENTICATION.md`](docs/TODO_AUTHENTICATION.md) before exposing the service publicly.
 
 ## Requirements
 
@@ -90,10 +90,9 @@ first authenticated request. Firebase Web App configuration is separate,
 client-side configuration and must never contain Admin credentials.
 
 Protected API requests use `Authorization: Bearer <Firebase ID token>`.
-`/health` remains public. The development sign-in helper that will make it
-easier to obtain and refresh a token is not implemented yet.
-In Swagger at `/docs`, select **Authorize** and paste the raw Firebase ID
-token (without the `Bearer ` prefix).
+`/health` remains public. For local API use, open Swagger at `/docs`, select
+**Authorize**, and paste the raw Firebase ID token (without the `Bearer `
+prefix). A separate local sign-in helper is not required for this workflow.
 
 Older development examples used the MongoDB key `local-user`. Existing records
 under legacy keys are not automatically moved or attached to a Firebase user;
@@ -107,7 +106,8 @@ routes return `503 Service Unavailable`.
 ## Basic API workflow
 
 The examples assume `$idToken` is a valid Firebase ID token obtained from a
-Firebase client. A local helper is planned but not yet available.
+Firebase client. The same token can be entered in Swagger's **Authorize**
+control for interactive API use.
 
 Save a user's sources:
 
@@ -252,6 +252,6 @@ The Apify scraper's charge cap is enforced by Apify; provider pricing and other 
 ## Security note
 
 User-specific API routes require a verified Firebase ID token and derive the
-user key from its UID. The local sign-in helper and some setup and verification
-work remain incomplete; keep the API local or otherwise access-restricted
-until the remaining checklist phases are complete.
+user key from its UID. Firebase Console provider setup and legacy-data
+inventory remain project-specific tasks; keep the API local or otherwise
+access-restricted until the deployment is configured and reviewed.

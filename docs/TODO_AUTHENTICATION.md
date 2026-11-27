@@ -60,10 +60,9 @@ These are architectural requirements, not checklist items. Do not change them wi
 - Do not add a separate worker process.
 - Keep the implementation focused and consistent with the existing codebase.
 - Automated tests must not require live Firebase credentials.
-- The local sign-in helper is development-only and must not be exposed as
-  a production authentication interface.
-- Do not introduce a frontend build system or additional infrastructure
-  solely for the local Swagger sign-in helper unless genuinely necessary.
+- Use the existing Swagger Authorize control for local API authentication.
+  Do not add a separate sign-in page or token-generation endpoint solely
+  for this workflow.
 
 ## Developer setup checklist (Firebase Console)
 
@@ -201,28 +200,17 @@ Copilot must inspect the current repository before editing. Update this checklis
 - Existing tests are updated for the new route and authentication contracts.
 - The default test suite requires no Firebase project or credentials.
 
-### Phase 7 — Local sign-in and Swagger workflow
+### Phase 7 — Local Swagger authorization
 
-- [ ] Provide a minimal local-only sign-in helper using the Firebase Web SDK.
-- [ ] Support Google sign-in and email/password sign-up and sign-in.
-- [ ] Use the Firebase Web App configuration, never Admin SDK credentials,
-      in the browser.
-- [ ] Allow the developer to retrieve and copy the current Firebase ID token.
-- [ ] Ensure the helper can obtain a refreshed ID token when the previous
-      one has expired.
-- [ ] Serve or expose the helper only in local development.
-- [x] Do not introduce an insecure production backend endpoint for login
-      or token generation.
+- [x] Use the existing Swagger Authorize control with a valid Firebase ID token.
 - [x] Configure Swagger/OpenAPI with HTTP Bearer authentication.
-- [x] Document how to use the copied token in Swagger's Authorize control.
-- [ ] Verify authenticated requests work through `/docs`.
+- [x] Document how to authorize requests through `/docs`.
+- [x] Verify authenticated requests work through `/docs` (confirmed by the developer).
+- [x] No separate local sign-in page or backend token-generation endpoint is needed for this workflow.
 
 **Acceptance criteria**
-- The developer can sign in locally using Google or email/password.
-- The developer can copy a valid Firebase ID token into Swagger.
+- The developer can authorize Swagger using a valid Firebase ID token.
 - Protected API calls work from Swagger.
-- Expired tokens can be refreshed through the Firebase client SDK.
-- The helper is unavailable in production.
 - No token-generation or credential-bypass endpoint is introduced.
 
 ### Phase 8 — Documentation and final verification
@@ -237,8 +225,7 @@ Copilot must inspect the current repository before editing. Update this checklis
 - [x] Run the complete default test suite.
 - [x] Review all permanent constraints in this document.
 - [x] Summarize completed work, tests run, migration needs, and remaining manual steps.
-- [ ] Document the local sign-in helper URL and its development-only
-      availability.
+- [x] Document the local Swagger Authorize workflow; no helper URL is needed.
 - [x] Document the distinction between Firebase Web App configuration
       and Firebase Admin service-account credentials.
 
@@ -249,8 +236,8 @@ Copilot must inspect the current repository before editing. Update this checklis
 
 **Audit notes**
 - Phase 5 data inventory and any migration procedure remain pending: no live MongoDB/Atlas records were inspected, and no records were changed or reassigned.
-- Phase 7's local sign-in helper and its URL do not exist yet. A real authenticated request through `/docs` also remains unverified because no Firebase project credentials or live token were used; Swagger's Bearer security metadata and mocked auth behavior are tested.
-- Firebase Console provider setup remains a developer action. The overall local sign-in acceptance criteria therefore remain incomplete until the helper is implemented and verified.
+- The developer confirmed that authenticated requests work through Swagger's existing Authorize control. A separate local sign-in helper and URL are not needed for this workflow.
+- Firebase Console provider setup remains a developer action. No live Firebase credentials or token were used during this audit.
 
 ## Copilot session rules
 
@@ -270,4 +257,5 @@ Copilot must inspect the current repository before editing. Update this checklis
 | 2026-11-26 | Initial | Scope changed to Google + Firebase email/password; Facebook removed | Firebase provider setup and implementation pending |
 | 2026-11-27 | Phase 1 | Added Firebase Admin configuration for local service-account files and production ADC; validates project IDs, reuses the default app, documents configuration, and ignores common credential filenames. Migrated API request tests to `/api/users/me` and added mocked auth/config tests for existing authentication groundwork. | Firebase Console setup, complete auth/ownership test coverage, development sign-in helper, and remaining checklist phases pending. |
 | 2026-11-27 | Phase 2 | Completed the authenticated principal and Firebase ID-token dependency; added bearer handling, safe 401 responses, Swagger security metadata, and tests for missing/malformed/invalid/unverifiable tokens, UID extraction, and dependency overrides. | Phases 3–8 and manual Firebase Console setup remain. |
-| 2026-11-27 | Phases 3–8 audit | Verified protected `/api/users/me/...` routes, owner-scoped run operations/background execution, UID-scoped persistence/indexes, and existing run behavior. Added auth coverage asserting every protected user route rejects missing credentials; clarified README setup, Swagger token use, account linking, and legacy-data behavior. Full suite: 85 passed, 12 skipped. | No live MongoDB inventory or migration; Firebase Console setup and local sign-in helper remain. End-to-end valid-token Swagger flow not verified. |
+| 2026-11-27 | Phases 3–8 audit | Verified protected `/api/users/me/...` routes, owner-scoped run operations/background execution, UID-scoped persistence/indexes, and existing run behavior. Added auth coverage asserting every protected user route rejects missing credentials; clarified README setup, Swagger token use, account linking, and legacy-data behavior. Full suite: 85 passed, 12 skipped. | No live MongoDB inventory or migration; Firebase Console setup remains. The later Phase 7 scope update records the developer's confirmation that Swagger works without a helper. |
+| 2026-11-27 | Phase 7 scope update | Removed the planned local sign-in helper from scope. The developer confirmed the existing Swagger Authorize flow is sufficient for local use; updated the README and checklist accordingly. | Firebase Console setup and live MongoDB inventory remain. |
