@@ -228,6 +228,7 @@ Copilot must inspect the current repository before editing. Update this checklis
 - [x] Document the local Swagger Authorize workflow; no helper URL is needed.
 - [x] Document the distinction between Firebase Web App configuration
       and Firebase Admin service-account credentials.
+- [x] Verify a live authenticated run completes through Apify and Gemini (developer-reported).
 
 **Acceptance criteria**
 - A developer can configure Firebase and run the authenticated backend by following the documentation.
@@ -237,7 +238,8 @@ Copilot must inspect the current repository before editing. Update this checklis
 **Audit notes**
 - Phase 5 data inventory and any migration procedure remain pending: no live MongoDB/Atlas records were inspected, and no records were changed or reassigned.
 - The developer confirmed that authenticated requests work through Swagger's existing Authorize control. A separate local sign-in helper and URL are not needed for this workflow.
-- Firebase Console provider setup remains a developer action. No live Firebase credentials or token were used during this audit.
+- The developer reports that Firebase authentication and a real Apify/Gemini run both succeeded. This is recorded as developer-reported validation; no live credentials or provider calls were made during this audit.
+- The Firebase authorized-domain item remains unchecked because the report does not establish which browser origin was used. The Firebase billing/plan state also remains unverified.
 
 ## Copilot session rules
 
@@ -259,3 +261,4 @@ Copilot must inspect the current repository before editing. Update this checklis
 | 2026-11-27 | Phase 2 | Completed the authenticated principal and Firebase ID-token dependency; added bearer handling, safe 401 responses, Swagger security metadata, and tests for missing/malformed/invalid/unverifiable tokens, UID extraction, and dependency overrides. | Phases 3–8 and manual Firebase Console setup remain. |
 | 2026-11-27 | Phases 3–8 audit | Verified protected `/api/users/me/...` routes, owner-scoped run operations/background execution, UID-scoped persistence/indexes, and existing run behavior. Added auth coverage asserting every protected user route rejects missing credentials; clarified README setup, Swagger token use, account linking, and legacy-data behavior. Full suite: 85 passed, 12 skipped. | No live MongoDB inventory or migration; Firebase Console setup remains. The later Phase 7 scope update records the developer's confirmation that Swagger works without a helper. |
 | 2026-11-27 | Phase 7 scope update | Removed the planned local sign-in helper from scope. The developer confirmed the existing Swagger Authorize flow is sufficient for local use; updated the README and checklist accordingly. | Firebase Console setup and live MongoDB inventory remain. |
+| 2026-11-27 | Live integration confirmation | The developer reports Firebase authentication works in the app and a real run completed using both Apify and Gemini. Added this as verified live-workflow evidence. | Firebase local authorized-domain configuration and billing/plan state were not confirmed; live MongoDB legacy-data inventory and any needed migration remain pending. |
