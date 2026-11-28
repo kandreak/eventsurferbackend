@@ -255,3 +255,13 @@ User-specific API routes require a verified Firebase ID token and derive the
 user key from its UID. Firebase Console provider setup and legacy-data
 inventory remain project-specific tasks; keep the API local or otherwise
 access-restricted until the deployment is configured and reviewed.
+
+## License
+
+EventSurfer is free software licensed under the
+GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later).
+
+You are free to use, modify, and distribute this software under
+the terms of the license.
+
+See [LICENSE](LICENSE) for the full license text.
